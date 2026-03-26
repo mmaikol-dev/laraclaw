@@ -11,6 +11,8 @@ import {
     Wrench,
     XCircle,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -456,11 +458,15 @@ function HistoryMessage({ message }: { message: ChatMessage }) {
                 )}
 
                 <div
-                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    className={`rounded-2xl px-4 py-3 text-sm ${
                         isUser ? 'bg-teal-600 text-white' : 'bg-muted text-foreground'
                     }`}
                 >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    {isUser ? (
+                        <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    ) : (
+                        <Markdown>{message.content ?? ''}</Markdown>
+                    )}
                     {message.stats.duration_ms > 0 && !isUser && (
                         <p className="mt-1.5 text-[11px] opacity-50">
                             {message.stats.tokens_per_second > 0 ? `${message.stats.tokens_per_second} tok/s · ` : ''}
@@ -498,9 +504,9 @@ function ThinkingTrace({ thinking, taskLogs }: { thinking: string | null; taskLo
                             <p className="mb-1.5 font-medium uppercase tracking-wide text-violet-500 opacity-70">
                                 Internal reasoning
                             </p>
-                            <p className="whitespace-pre-wrap leading-relaxed text-muted-foreground italic">
-                                {thinking}
-                            </p>
+                            <div className="italic text-muted-foreground">
+                                <Markdown>{thinking ?? ''}</Markdown>
+                            </div>
                         </div>
                     )}
 
@@ -617,12 +623,12 @@ function LiveStreamArea({
                                 </CollapsibleTrigger>
                                 <CollapsibleContent>
                                     <div className="border-t border-violet-200 px-3 py-2 dark:border-violet-800">
-                                        <p className="whitespace-pre-wrap italic leading-relaxed text-violet-800 dark:text-violet-300">
-                                            {liveThinking}
+                                        <div className="italic text-violet-800 dark:text-violet-300">
+                                            <Markdown>{liveThinking}</Markdown>
                                             {!liveThinkingDone && (
-                                                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse rounded-sm bg-violet-400 align-middle" />
+                                                <span className="inline-block h-3 w-1 animate-pulse rounded-sm bg-violet-400 align-middle" />
                                             )}
-                                        </p>
+                                        </div>
                                     </div>
                                 </CollapsibleContent>
                             </div>
@@ -653,12 +659,10 @@ function LiveStreamArea({
                         .map((entry) => (
                             <div
                                 key={entry.id}
-                                className="rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed text-foreground"
+                                className="rounded-2xl bg-muted px-4 py-3 text-sm text-foreground"
                             >
-                                <p className="whitespace-pre-wrap">
-                                    {entry.content}
-                                    <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-teal-500 align-middle" />
-                                </p>
+                                <Markdown>{entry.content}</Markdown>
+                                <span className="inline-block h-4 w-1.5 animate-pulse rounded-sm bg-teal-500 align-middle" />
                             </div>
                         ))}
                 </div>
@@ -711,6 +715,60 @@ function ToolCard({ tool }: { tool: StreamTool }) {
                 </CollapsibleContent>
             </div>
         </Collapsible>
+    );
+}
+
+// ── Markdown renderer ────────────────────────────────────────────────────────
+
+function Markdown({ children, dim = false }: { children: string; dim?: boolean }) {
+    return (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+                p: ({ children: c }) => <p className="mb-2 last:mb-0 leading-relaxed">{c}</p>,
+                h1: ({ children: c }) => <h1 className="mb-2 mt-4 text-xl font-bold first:mt-0">{c}</h1>,
+                h2: ({ children: c }) => <h2 className="mb-2 mt-3 text-lg font-semibold first:mt-0">{c}</h2>,
+                h3: ({ children: c }) => <h3 className="mb-1.5 mt-3 text-base font-semibold first:mt-0">{c}</h3>,
+                ul: ({ children: c }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{c}</ul>,
+                ol: ({ children: c }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{c}</ol>,
+                li: ({ children: c }) => <li className="leading-relaxed">{c}</li>,
+                strong: ({ children: c }) => <strong className="font-semibold">{c}</strong>,
+                em: ({ children: c }) => <em className="italic">{c}</em>,
+                code: ({ children: c, className }) => {
+                    const isBlock = className?.includes('language-');
+                    return isBlock ? (
+                        <code className="block">{c}</code>
+                    ) : (
+                        <code className={`rounded px-1 py-0.5 font-mono text-[0.85em] ${dim ? 'bg-white/10' : 'bg-muted-foreground/10'}`}>{c}</code>
+                    );
+                },
+                pre: ({ children: c }) => (
+                    <pre className={`mb-2 overflow-x-auto rounded-lg p-3 font-mono text-xs leading-relaxed ${dim ? 'bg-white/10' : 'bg-muted-foreground/10'}`}>
+                        {c}
+                    </pre>
+                ),
+                blockquote: ({ children: c }) => (
+                    <blockquote className={`mb-2 border-l-2 pl-3 italic ${dim ? 'border-white/40 opacity-80' : 'border-muted-foreground/30 text-muted-foreground'}`}>
+                        {c}
+                    </blockquote>
+                ),
+                a: ({ children: c, href }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 opacity-80 hover:opacity-100">
+                        {c}
+                    </a>
+                ),
+                hr: () => <hr className="my-3 border-current opacity-20" />,
+                table: ({ children: c }) => (
+                    <div className="mb-2 overflow-x-auto">
+                        <table className="w-full border-collapse text-xs">{c}</table>
+                    </div>
+                ),
+                th: ({ children: c }) => <th className="border border-current px-2 py-1 text-left font-semibold opacity-70">{c}</th>,
+                td: ({ children: c }) => <td className="border border-current px-2 py-1 opacity-80">{c}</td>,
+            }}
+        >
+            {children}
+        </ReactMarkdown>
     );
 }
 
