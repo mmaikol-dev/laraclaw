@@ -9,6 +9,7 @@ use App\Models\AgentSetting;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\MetricSnapshot;
+use App\Models\Skill;
 use App\Models\TaskLog;
 
 class AgentService
@@ -42,19 +43,23 @@ class AgentService
             ])->save();
         }
 
+        $basePrompt = (string) AgentSetting::get(
+            'system_prompt',
+            "You are LaraClaw, a helpful local AI agent running on the user's Linux machine.",
+        );
+
+        $systemPrompt = $basePrompt.$this->buildSkillsContext();
+
         $history = [
             [
                 'role' => 'system',
-                'content' => (string) AgentSetting::get(
-                    'system_prompt',
-                    "You are LaraClaw, a helpful local AI agent running on the user's Linux machine.",
-                ),
+                'content' => $systemPrompt,
             ],
         ];
         $history = [...$history, ...$conversation->fresh()->toOllamaMessages()];
         $tools = $this->tools->toOllamaTools();
         $temperature = (float) AgentSetting::get('temperature', '0.7');
-        $maxIterations = 10;
+        $maxIterations = 300;
 
         try {
             for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
@@ -341,6 +346,24 @@ class AgentService
         ]));
 
         return $assistantMessage;
+    }
+
+    private function buildSkillsContext(): string
+    {
+        $skills = Skill::where('is_active', true)
+            ->orderBy('category')
+            ->orderBy('name')
+            ->get();
+
+        if ($skills->isEmpty()) {
+            return '';
+        }
+
+        $lines = $skills->map(function (Skill $skill): string {
+            return "  - [{$skill->category}] {$skill->name}: {$skill->description}";
+        })->implode("\n");
+
+        return "\n\n=== Available Skills ===\nYou have the following skills available. Use the skill tool (action: read, name: <skill-name>) to load a skill's full instructions before applying it. Choose the most relevant skill automatically — do not ask the user which to use.\n\n{$lines}\n\nYou may also create new skills, update existing ones, or remove outdated ones using the skill tool as you learn better ways to accomplish tasks.";
     }
 
     /**

@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\MetricsController;
 use App\Http\Controllers\Api\SettingsController;
+use App\Http\Controllers\Api\SkillController;
 use App\Http\Controllers\Api\TaskController;
 use Illuminate\Support\Facades\Route;
 
@@ -26,6 +27,10 @@ Route::prefix('v1')->group(function () {
     Route::get('tasks', [TaskController::class, 'index'])->name('api.tasks.index');
     Route::get('tasks/stats', [TaskController::class, 'stats'])->name('api.tasks.stats');
     Route::get('tasks/{task}', [TaskController::class, 'show'])->name('api.tasks.show');
+    Route::get('skills', [SkillController::class, 'index'])->name('api.skills.index');
+    Route::post('skills', [SkillController::class, 'store'])->name('api.skills.store');
+    Route::put('skills/{skill}', [SkillController::class, 'update'])->name('api.skills.update');
+    Route::delete('skills/{skill}', [SkillController::class, 'destroy'])->name('api.skills.destroy');
     Route::get('metrics', [MetricsController::class, 'index'])->name('api.metrics.index');
     Route::get('settings', [SettingsController::class, 'index'])->name('api.settings.index');
     Route::post('settings', [SettingsController::class, 'update'])->name('api.settings.update');

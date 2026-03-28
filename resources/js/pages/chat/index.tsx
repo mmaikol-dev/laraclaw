@@ -1,21 +1,33 @@
 import { Head } from '@inertiajs/react';
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
+    Archive,
     Bot,
     Brain,
     CheckCircle2,
     ChevronDown,
     LoaderCircle,
     MessageSquarePlus,
+    MessagesSquare,
+    MoreHorizontal,
+    PenSquare,
     SendHorizontal,
     Wrench,
     XCircle,
+    Zap,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import AppLayout from '@/layouts/app-layout';
 import { index as chatRoute } from '@/routes/chat';
@@ -95,10 +107,22 @@ type FeedEntry =
     | { id: string; kind: 'tool'; tool: StreamTool }
     | { id: string; kind: 'response'; content: string };
 
+type ConversationSummary = {
+    id: number;
+    title: string;
+    model: string;
+    message_count: number;
+    updated_at: string | null;
+};
+
+type ConversationListResponse = { data: ConversationSummary[] };
+
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Chat', href: chatRoute() }];
 
 export default function ChatIndex({ conversationId }: { conversationId: number | null }) {
     const [activeConversationId, setActiveConversationId] = useState<number | null>(conversationId);
+    const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+    const [conversationsLoading, setConversationsLoading] = useState(true);
     const [message, setMessage] = useState('');
     const [conversation, setConversation] = useState<ConversationPayload | null>(null);
     const [streamState, setStreamState] = useState<AgentStreamState | null>(null);
@@ -116,11 +140,36 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
         setActiveConversationId(conversationId);
     }, [conversationId]);
 
+    async function loadConversations(): Promise<void> {
+        try {
+            const response = await api<ConversationListResponse>('/conversations');
+            setConversations(response.data);
+        } finally {
+            setConversationsLoading(false);
+        }
+    }
+
     async function loadConversation(id: number): Promise<void> {
         const response = await api<ConversationResponse>(`/conversations/${id}`);
         setConversation(response.data);
         setStreamState(response.data.stream);
     }
+
+    async function archiveConversation(id: number): Promise<void> {
+        await api(`/conversations/${id}`, { method: 'DELETE' });
+        setConversations((prev) => prev.filter((c) => c.id !== id));
+        if (activeConversationId === id) {
+            setActiveConversationId(null);
+            setConversation(null);
+            setStreamState(null);
+            setFeedEntries([]);
+            window.history.replaceState({}, '', '/chat');
+        }
+    }
+
+    useEffect(() => {
+        void loadConversations();
+    }, []);
 
     useEffect(() => {
         if (activeConversationId === null) {
@@ -330,12 +379,13 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                 targetId = await createConversation();
                 setActiveConversationId(targetId);
                 window.history.replaceState({}, '', `/chat/${targetId}`);
+                void loadConversations();
             }
 
             await loadConversation(targetId);
             await consumeStream(targetId, trimmedMessage);
             setPendingUserMessage(null);
-            await loadConversation(targetId);
+            await Promise.all([loadConversation(targetId), loadConversations()]);
         } catch {
             setError('Your message could not be sent.');
         } finally {
@@ -355,78 +405,144 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
         (m) => m.role === 'user' || (m.role === 'assistant' && m.content !== null && m.content !== ''),
     ) ?? [];
 
+    function handleNewChat(): void {
+        setActiveConversationId(null);
+        window.history.replaceState({}, '', '/chat');
+    }
+
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={conversation?.title ?? 'Chat'} />
 
-            <div className="flex h-full flex-col">
-                <div className="flex-1 overflow-y-auto">
-                    <div className="mx-auto max-w-3xl space-y-4 px-4 py-6">
-                        {isLoading ? (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <LoaderCircle className="size-4 animate-spin" />
-                                Loading conversation...
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+                {/* ── Conversations sidebar ── */}
+                <aside className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
+                    <div className="flex items-center justify-between border-b px-3 py-2.5">
+                        <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            <MessagesSquare className="size-3.5 text-teal-500" />
+                            Conversations
+                        </span>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-6 text-muted-foreground hover:text-foreground"
+                            onClick={handleNewChat}
+                            title="New conversation"
+                        >
+                            <PenSquare className="size-3.5" />
+                        </Button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto py-1">
+                        {conversationsLoading ? (
+                            <div className="space-y-1 px-2 py-2">
+                                {[...Array(5)].map((_, i) => (
+                                    <Skeleton key={i} className="h-8 w-full rounded-md" />
+                                ))}
                             </div>
-                        ) : conversation === null && !isStreaming ? (
-                            <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-                                <div className="rounded-full bg-teal-100 p-4 text-teal-700 dark:bg-teal-950 dark:text-teal-300">
-                                    <MessageSquarePlus className="size-8" />
-                                </div>
-                                <div className="space-y-1">
-                                    <h2 className="text-xl font-semibold">Start a conversation</h2>
-                                    <p className="text-sm text-muted-foreground">
-                                        Ask LaraClaw anything — it can read files, run shell commands, and search the web.
-                                    </p>
-                                </div>
+                        ) : conversations.length === 0 ? (
+                            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+                                <MessagesSquare className="size-8 text-muted-foreground/30" />
+                                <p className="text-xs text-muted-foreground">No conversations yet</p>
                             </div>
                         ) : (
-                            <>
-                                {visibleMessages.map((msg) => (
-                                    <HistoryMessage key={msg.id} message={msg} />
-                                ))}
-
-                                {isStreaming && (
-                                    <LiveStreamArea
-                                        pendingUserMessage={pendingUserMessage}
-                                        streamState={streamState}
-                                        feedEntries={feedEntries}
-                                        liveThinking={liveThinking}
-                                        liveThinkingDone={liveThinkingDone}
+                            <ul className="space-y-px px-2 py-1">
+                                {conversations.map((conv) => (
+                                    <ConversationItem
+                                        key={conv.id}
+                                        conversation={conv}
+                                        isActive={activeConversationId === conv.id}
+                                        onSelect={() => {
+                                            setActiveConversationId(conv.id);
+                                            window.history.replaceState({}, '', `/chat/${conv.id}`);
+                                        }}
+                                        onArchive={() => void archiveConversation(conv.id)}
                                     />
-                                )}
-                            </>
+                                ))}
+                            </ul>
                         )}
-                        <div ref={bottomRef} />
                     </div>
-                </div>
+                </aside>
 
-                <div className="border-t bg-background px-4 py-4">
-                    <div className="mx-auto max-w-3xl">
-                        <form onSubmit={handleSubmit}>
-                            <div className="rounded-2xl border bg-card shadow-sm focus-within:ring-2 focus-within:ring-teal-500/30">
-                                <textarea
-                                    value={message}
-                                    onChange={(e) => setMessage(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    rows={3}
-                                    placeholder="Message LaraClaw..."
-                                    className="w-full resize-none rounded-t-2xl border-0 bg-transparent px-4 pt-4 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
-                                    disabled={isSending}
-                                />
-                                <div className="flex items-center justify-between px-4 pb-3">
-                                    <p className="text-xs text-muted-foreground">Enter to send · Shift+Enter for newline</p>
-                                    <Button type="submit" size="sm" disabled={isSending || message.trim() === ''}>
-                                        {isSending ? (
-                                            <LoaderCircle className="size-4 animate-spin" />
-                                        ) : (
-                                            <SendHorizontal className="size-4" />
-                                        )}
-                                        Send
-                                    </Button>
+                {/* ── Chat panel ── */}
+                <div className="relative flex min-w-0 flex-1 flex-col">
+                    {/* Scrollable messages */}
+                    <div className="flex-1 overflow-y-auto">
+                        <div className="mx-auto max-w-3xl space-y-6 px-4 pb-2 pt-6">
+                            {isLoading ? (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <LoaderCircle className="size-4 animate-spin" />
+                                    Loading conversation…
                                 </div>
-                            </div>
-                            {error !== null && <p className="mt-2 text-sm text-destructive">{error}</p>}
-                        </form>
+                            ) : conversation === null && !isStreaming ? (
+                                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
+                                    <div className="rounded-2xl bg-teal-50 p-5 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400">
+                                        <MessageSquarePlus className="size-10" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <h2 className="text-lg font-semibold">Start a conversation</h2>
+                                        <p className="max-w-sm text-sm text-muted-foreground">
+                                            Ask LaraClaw anything — it can read files, run shell commands, and search the web.
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {visibleMessages.map((msg) => (
+                                        <HistoryMessage key={msg.id} message={msg} />
+                                    ))}
+
+                                    {isStreaming && (
+                                        <LiveStreamArea
+                                            pendingUserMessage={pendingUserMessage}
+                                            streamState={streamState}
+                                            feedEntries={feedEntries}
+                                            liveThinking={liveThinking}
+                                            liveThinkingDone={liveThinkingDone}
+                                        />
+                                    )}
+                                </>
+                            )}
+                            <div ref={bottomRef} />
+                        </div>
+                    </div>
+
+                    {/* Floating input — pinned to bottom, never scrolls */}
+                    <div className="shrink-0 px-4 pb-4 pt-2">
+                        <div className="mx-auto max-w-3xl">
+                            <form onSubmit={handleSubmit}>
+                                <div className="rounded-2xl border bg-card shadow-lg ring-1 ring-border/50 focus-within:ring-2 focus-within:ring-teal-500/40 dark:shadow-black/30">
+                                    <textarea
+                                        value={message}
+                                        onChange={(e) => setMessage(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        rows={3}
+                                        placeholder="Message LaraClaw…"
+                                        className="w-full resize-none rounded-t-2xl border-0 bg-transparent px-4 pt-3.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                                        disabled={isSending}
+                                    />
+                                    <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
+                                        <p className="text-[11px] text-muted-foreground/60">⏎ send · ⇧⏎ newline</p>
+                                        <Button
+                                            type="submit"
+                                            size="sm"
+                                            className="h-8 gap-1.5 rounded-xl bg-teal-600 px-3 text-xs hover:bg-teal-700"
+                                            disabled={isSending || message.trim() === ''}
+                                        >
+                                            {isSending ? (
+                                                <LoaderCircle className="size-3.5 animate-spin" />
+                                            ) : (
+                                                <SendHorizontal className="size-3.5" />
+                                            )}
+                                            Send
+                                        </Button>
+                                    </div>
+                                </div>
+                                {error !== null && (
+                                    <p className="mt-1.5 text-xs text-destructive">{error}</p>
+                                )}
+                            </form>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -442,24 +558,26 @@ function HistoryMessage({ message }: { message: ChatMessage }) {
     const hasTaskLogs = message.task_logs.length > 0;
 
     return (
-        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
             {!isUser && (
-                <div className="mr-2 mt-1 shrink-0">
-                    <div className="flex size-7 items-center justify-center rounded-full bg-teal-600 text-white">
+                <div className="mt-0.5 shrink-0">
+                    <div className="flex size-8 items-center justify-center rounded-xl bg-teal-600 text-white shadow-sm">
                         <Bot className="size-4" />
                     </div>
                 </div>
             )}
 
-            <div className="flex max-w-[80%] flex-col gap-1.5">
-                {/* Thinking trace (clickable) — shown above the message bubble */}
+            <div className={`flex flex-col gap-2 ${isUser ? 'items-end max-w-[78%]' : 'items-start max-w-[85%]'}`}>
+                {/* Thinking trace — above the bubble */}
                 {!isUser && (hasThinking || hasTaskLogs) && (
                     <ThinkingTrace thinking={message.thinking} taskLogs={message.task_logs} />
                 )}
 
                 <div
-                    className={`rounded-2xl px-4 py-3 text-sm ${
-                        isUser ? 'bg-teal-600 text-white' : 'bg-muted text-foreground'
+                    className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                        isUser
+                            ? 'rounded-tr-sm bg-teal-600 text-white'
+                            : 'rounded-tl-sm border bg-card text-foreground'
                     }`}
                 >
                     {isUser ? (
@@ -467,8 +585,9 @@ function HistoryMessage({ message }: { message: ChatMessage }) {
                     ) : (
                         <Markdown>{message.content ?? ''}</Markdown>
                     )}
+
                     {message.stats.duration_ms > 0 && !isUser && (
-                        <p className="mt-1.5 text-[11px] opacity-50">
+                        <p className="mt-2 border-t pt-1.5 text-[10px] text-muted-foreground/50">
                             {message.stats.tokens_per_second > 0 ? `${message.stats.tokens_per_second} tok/s · ` : ''}
                             {message.stats.duration_ms}ms
                         </p>
@@ -527,24 +646,58 @@ function ThinkingTrace({ thinking, taskLogs }: { thinking: string | null; taskLo
 function HistoryToolRow({ log }: { log: TaskLog }) {
     const isSuccess = log.status === 'success';
     const isError = log.status === 'error';
+    const isSkill = log.tool_name === 'skill';
+
+    const skillAction = isSkill ? (log.tool_input?.action as string | undefined) : undefined;
+    const skillName = isSkill ? (log.tool_input?.name as string | undefined) : undefined;
+
+    const skillLabel: Record<string, string> = {
+        read: 'Loaded skill',
+        create: 'Created skill',
+        update: 'Updated skill',
+        delete: 'Deleted skill',
+        list: 'Listed skills',
+    };
 
     return (
         <Collapsible>
-            <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/40">
-                {isSuccess && <CheckCircle2 className="size-3.5 shrink-0 text-teal-500" />}
-                {isError && <XCircle className="size-3.5 shrink-0 text-destructive" />}
-                {!isSuccess && !isError && <Wrench className="size-3.5 shrink-0 text-muted-foreground" />}
-                <span className="grow truncate font-mono text-foreground">{log.tool_name}</span>
+            <CollapsibleTrigger className={`flex w-full items-center gap-2 px-3 py-2 text-left ${isSkill ? 'hover:bg-amber-50/60 dark:hover:bg-amber-950/20' : 'hover:bg-muted/40'}`}>
+                {isSkill ? (
+                    <Zap className={`size-3.5 shrink-0 ${isError ? 'text-destructive' : 'text-amber-500'}`} />
+                ) : (
+                    <>
+                        {isSuccess && <CheckCircle2 className="size-3.5 shrink-0 text-teal-500" />}
+                        {isError && <XCircle className="size-3.5 shrink-0 text-destructive" />}
+                        {!isSuccess && !isError && <Wrench className="size-3.5 shrink-0 text-muted-foreground" />}
+                    </>
+                )}
+
+                {isSkill ? (
+                    <span className="grow truncate">
+                        <span className="font-medium text-amber-700 dark:text-amber-300">
+                            {skillAction !== undefined ? (skillLabel[skillAction] ?? 'Skill') : 'Skill'}
+                        </span>
+                        {skillName !== undefined && (
+                            <span className="ml-1.5 font-mono text-[11px] text-amber-600/70 dark:text-amber-400/70">· {skillName}</span>
+                        )}
+                    </span>
+                ) : (
+                    <span className="grow truncate font-mono text-foreground">{log.tool_name}</span>
+                )}
+
                 {log.duration_ms > 0 && (
                     <span className="shrink-0 text-muted-foreground">{log.duration_ms}ms</span>
                 )}
-                <Badge variant={isError ? 'destructive' : isSuccess ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
+                <Badge
+                    variant={isError ? 'destructive' : isSuccess ? 'default' : 'secondary'}
+                    className={`shrink-0 text-[10px] ${isSkill && isSuccess ? 'bg-amber-500' : ''}`}
+                >
                     {log.status}
                 </Badge>
                 <ChevronDown className="size-3 shrink-0 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
             </CollapsibleTrigger>
             <CollapsibleContent>
-                <div className="border-t bg-background/60 px-3 py-2 font-mono">
+                <div className={`border-t px-3 py-2 font-mono ${isSkill ? 'bg-amber-50/30 dark:bg-amber-950/10' : 'bg-background/60'}`}>
                     {log.tool_input !== null && (
                         <>
                             <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Input</p>
@@ -659,10 +812,10 @@ function LiveStreamArea({
                         .map((entry) => (
                             <div
                                 key={entry.id}
-                                className="rounded-2xl bg-muted px-4 py-3 text-sm text-foreground"
+                                className="rounded-2xl rounded-tl-sm border bg-card px-4 py-3 text-sm text-foreground shadow-sm"
                             >
                                 <Markdown>{entry.content}</Markdown>
-                                <span className="inline-block h-4 w-1.5 animate-pulse rounded-sm bg-teal-500 align-middle" />
+                                <span className="inline-block h-4 w-1 animate-pulse rounded-sm bg-teal-500 align-middle" />
                             </div>
                         ))}
                 </div>
@@ -674,31 +827,62 @@ function LiveStreamArea({
 // ── Tool card (live) ─────────────────────────────────────────────────────────
 
 function ToolCard({ tool }: { tool: StreamTool }) {
+    const isSkill = tool.tool_name === 'skill';
     const isRunning = tool.status === 'running';
     const isError = tool.status === 'error';
     const isSuccess = tool.status === 'success';
 
+    const skillAction = isSkill ? (tool.input.action as string | undefined) : undefined;
+    const skillName = isSkill ? (tool.input.name as string | undefined) : undefined;
+
+    const skillLabel: Record<string, string> = {
+        read: 'Loading skill',
+        create: 'Creating skill',
+        update: 'Updating skill',
+        delete: 'Deleting skill',
+        list: 'Listing skills',
+    };
+
     return (
         <Collapsible>
-            <div className="overflow-hidden rounded-xl border bg-background text-xs">
-                <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50">
+            <div className={`overflow-hidden rounded-xl border text-xs ${isSkill ? 'border-amber-200 bg-amber-50/50 dark:border-amber-800/60 dark:bg-amber-950/20' : 'bg-background'}`}>
+                <CollapsibleTrigger className={`flex w-full items-center gap-2 px-3 py-2 text-left ${isSkill ? 'hover:bg-amber-100/50 dark:hover:bg-amber-900/20' : 'hover:bg-muted/50'}`}>
                     <span className="shrink-0">
-                        {isRunning && <LoaderCircle className="size-3.5 animate-spin text-amber-500" />}
-                        {isSuccess && <CheckCircle2 className="size-3.5 text-teal-500" />}
+                        {isRunning && isSkill && <Zap className="size-3.5 animate-pulse text-amber-500" />}
+                        {isRunning && !isSkill && <LoaderCircle className="size-3.5 animate-spin text-amber-500" />}
+                        {isSuccess && isSkill && <Zap className="size-3.5 text-amber-500" />}
+                        {isSuccess && !isSkill && <CheckCircle2 className="size-3.5 text-teal-500" />}
                         {isError && <XCircle className="size-3.5 text-destructive" />}
-                        {!isRunning && !isSuccess && !isError && <Wrench className="size-3.5 text-muted-foreground" />}
+                        {!isRunning && !isSuccess && !isError && !isSkill && <Wrench className="size-3.5 text-muted-foreground" />}
+                        {!isRunning && !isSuccess && !isError && isSkill && <Zap className="size-3.5 text-amber-400" />}
                     </span>
-                    <span className="grow truncate font-mono text-foreground">{tool.tool_name}</span>
+
+                    {isSkill ? (
+                        <span className="grow truncate">
+                            <span className="font-medium text-amber-700 dark:text-amber-300">
+                                {skillAction !== undefined ? (skillLabel[skillAction] ?? 'Skill') : 'Skill'}
+                            </span>
+                            {skillName !== undefined && (
+                                <span className="ml-1.5 font-mono text-amber-600/80 dark:text-amber-400/80">· {skillName}</span>
+                            )}
+                        </span>
+                    ) : (
+                        <span className="grow truncate font-mono text-foreground">{tool.tool_name}</span>
+                    )}
+
                     {tool.duration_ms !== null && (
                         <span className="shrink-0 text-muted-foreground">{tool.duration_ms}ms</span>
                     )}
-                    <Badge variant={isError ? 'destructive' : isSuccess ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
+                    <Badge
+                        variant={isError ? 'destructive' : isSuccess ? 'default' : 'secondary'}
+                        className={`shrink-0 text-[10px] ${isSkill && isSuccess ? 'bg-amber-500' : ''}`}
+                    >
                         {tool.status}
                     </Badge>
                     <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                    <div className="border-t bg-muted/30 px-3 py-2 font-mono">
+                    <div className={`border-t px-3 py-2 font-mono ${isSkill ? 'border-amber-200 bg-amber-50/30 dark:border-amber-800/40 dark:bg-amber-950/10' : 'bg-muted/30'}`}>
                         <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Input</p>
                         <pre className="overflow-x-auto whitespace-pre-wrap break-all text-foreground">
                             {JSON.stringify(tool.input, null, 2)}
@@ -722,53 +906,178 @@ function ToolCard({ tool }: { tool: StreamTool }) {
 
 function Markdown({ children, dim = false }: { children: string; dim?: boolean }) {
     return (
-        <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-                p: ({ children: c }) => <p className="mb-2 last:mb-0 leading-relaxed">{c}</p>,
-                h1: ({ children: c }) => <h1 className="mb-2 mt-4 text-xl font-bold first:mt-0">{c}</h1>,
-                h2: ({ children: c }) => <h2 className="mb-2 mt-3 text-lg font-semibold first:mt-0">{c}</h2>,
-                h3: ({ children: c }) => <h3 className="mb-1.5 mt-3 text-base font-semibold first:mt-0">{c}</h3>,
-                ul: ({ children: c }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{c}</ul>,
-                ol: ({ children: c }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{c}</ol>,
-                li: ({ children: c }) => <li className="leading-relaxed">{c}</li>,
-                strong: ({ children: c }) => <strong className="font-semibold">{c}</strong>,
-                em: ({ children: c }) => <em className="italic">{c}</em>,
-                code: ({ children: c, className }) => {
-                    const isBlock = className?.includes('language-');
-                    return isBlock ? (
-                        <code className="block">{c}</code>
-                    ) : (
-                        <code className={`rounded px-1 py-0.5 font-mono text-[0.85em] ${dim ? 'bg-white/10' : 'bg-muted-foreground/10'}`}>{c}</code>
-                    );
-                },
-                pre: ({ children: c }) => (
-                    <pre className={`mb-2 overflow-x-auto rounded-lg p-3 font-mono text-xs leading-relaxed ${dim ? 'bg-white/10' : 'bg-muted-foreground/10'}`}>
-                        {c}
-                    </pre>
-                ),
-                blockquote: ({ children: c }) => (
-                    <blockquote className={`mb-2 border-l-2 pl-3 italic ${dim ? 'border-white/40 opacity-80' : 'border-muted-foreground/30 text-muted-foreground'}`}>
-                        {c}
-                    </blockquote>
-                ),
-                a: ({ children: c, href }) => (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 opacity-80 hover:opacity-100">
-                        {c}
-                    </a>
-                ),
-                hr: () => <hr className="my-3 border-current opacity-20" />,
-                table: ({ children: c }) => (
-                    <div className="mb-2 overflow-x-auto">
-                        <table className="w-full border-collapse text-xs">{c}</table>
-                    </div>
-                ),
-                th: ({ children: c }) => <th className="border border-current px-2 py-1 text-left font-semibold opacity-70">{c}</th>,
-                td: ({ children: c }) => <td className="border border-current px-2 py-1 opacity-80">{c}</td>,
-            }}
-        >
-            {children}
-        </ReactMarkdown>
+        <div className="markdown-body text-sm leading-relaxed">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    p: ({ children: c }) => <p className="mb-3 last:mb-0 leading-7">{c}</p>,
+
+                    h1: ({ children: c }) => (
+                        <h1 className="mb-3 mt-6 border-b pb-1.5 text-xl font-bold tracking-tight first:mt-0">
+                            {c}
+                        </h1>
+                    ),
+                    h2: ({ children: c }) => (
+                        <h2 className="mb-2.5 mt-5 text-base font-semibold tracking-tight first:mt-0">{c}</h2>
+                    ),
+                    h3: ({ children: c }) => (
+                        <h3 className="mb-2 mt-4 text-sm font-semibold first:mt-0">{c}</h3>
+                    ),
+                    h4: ({ children: c }) => (
+                        <h4 className="mb-1.5 mt-3 text-sm font-medium first:mt-0">{c}</h4>
+                    ),
+
+                    ul: ({ children: c }) => (
+                        <ul className="mb-3 space-y-1 pl-5 [&>li]:relative [&>li]:before:absolute [&>li]:before:-left-4 [&>li]:before:top-[0.4em] [&>li]:before:size-1.5 [&>li]:before:rounded-full [&>li]:before:bg-teal-500/70 [&>li]:before:content-['']">
+                            {c}
+                        </ul>
+                    ),
+                    ol: ({ children: c }) => (
+                        <ol className="mb-3 list-decimal space-y-1 pl-5 marker:text-teal-600/70 marker:text-xs">
+                            {c}
+                        </ol>
+                    ),
+                    li: ({ children: c }) => <li className="leading-relaxed">{c}</li>,
+
+                    strong: ({ children: c }) => <strong className="font-semibold">{c}</strong>,
+                    em: ({ children: c }) => <em className="italic opacity-90">{c}</em>,
+
+                    code: ({ children: c, className }) => {
+                        const isBlock = className?.includes('language-');
+                        const lang = className?.replace('language-', '') ?? '';
+                        return isBlock ? (
+                            <code className="block font-mono text-xs leading-relaxed" data-lang={lang}>
+                                {c}
+                            </code>
+                        ) : (
+                            <code
+                                className={`rounded-md px-1.5 py-0.5 font-mono text-[0.8em] ${
+                                    dim
+                                        ? 'bg-white/15 text-white/90'
+                                        : 'bg-teal-500/10 text-teal-700 dark:text-teal-300'
+                                }`}
+                            >
+                                {c}
+                            </code>
+                        );
+                    },
+
+                    pre: ({ children: c, ...rest }) => {
+                        const codeEl = (rest as { node?: { children?: Array<{ properties?: { className?: string[] } }> } }).node?.children?.[0];
+                        const lang = (codeEl?.properties?.className ?? []).find((cl: string) => cl.startsWith('language-'))?.replace('language-', '') ?? '';
+                        return (
+                            <div className="group relative mb-3">
+                                {lang !== '' && (
+                                    <span className="absolute right-2.5 top-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/50">
+                                        {lang}
+                                    </span>
+                                )}
+                                <pre
+                                    className={`overflow-x-auto rounded-xl p-4 font-mono text-xs leading-relaxed ${
+                                        dim
+                                            ? 'bg-white/10 text-white/80'
+                                            : 'bg-zinc-950 text-zinc-100 dark:bg-zinc-900'
+                                    }`}
+                                >
+                                    {c}
+                                </pre>
+                            </div>
+                        );
+                    },
+
+                    blockquote: ({ children: c }) => (
+                        <blockquote
+                            className={`mb-3 rounded-r-lg border-l-2 pl-4 italic ${
+                                dim
+                                    ? 'border-white/30 text-white/70'
+                                    : 'border-teal-500/50 bg-teal-500/5 py-1 pr-3 text-muted-foreground'
+                            }`}
+                        >
+                            {c}
+                        </blockquote>
+                    ),
+
+                    a: ({ children: c, href }) => (
+                        <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-teal-600 underline underline-offset-2 hover:text-teal-500 dark:text-teal-400"
+                        >
+                            {c}
+                        </a>
+                    ),
+
+                    hr: () => <hr className="my-4 border-border/50" />,
+
+                    table: ({ children: c }) => (
+                        <div className="mb-3 overflow-x-auto rounded-xl border">
+                            <table className="w-full border-collapse text-xs">{c}</table>
+                        </div>
+                    ),
+                    thead: ({ children: c }) => <thead className="bg-muted/60">{c}</thead>,
+                    th: ({ children: c }) => (
+                        <th className="border-b px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {c}
+                        </th>
+                    ),
+                    td: ({ children: c }) => (
+                        <td className="border-b border-border/40 px-3 py-2 last:border-b-0">{c}</td>
+                    ),
+                    tr: ({ children: c }) => (
+                        <tr className="transition-colors hover:bg-muted/30">{c}</tr>
+                    ),
+                }}
+            >
+                {children}
+            </ReactMarkdown>
+        </div>
+    );
+}
+
+// ── Conversation list item ────────────────────────────────────────────────────
+
+function ConversationItem({
+    conversation,
+    isActive,
+    onSelect,
+    onArchive,
+}: {
+    conversation: ConversationSummary;
+    isActive: boolean;
+    onSelect: () => void;
+    onArchive: () => void;
+}) {
+    return (
+        <li className="group relative flex items-center">
+            <button
+                onClick={onSelect}
+                className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors ${
+                    isActive
+                        ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300'
+                        : 'text-foreground hover:bg-muted/60'
+                }`}
+            >
+                <MessagesSquare
+                    className={`size-3.5 shrink-0 ${isActive ? 'text-teal-500' : 'text-muted-foreground'}`}
+                />
+                <span className="truncate">{conversation.title}</span>
+            </button>
+
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <button className="absolute right-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100">
+                        <MoreHorizontal className="size-3.5" />
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                    <DropdownMenuItem onClick={onArchive} className="gap-2 text-destructive focus:text-destructive">
+                        <Archive className="size-3.5" />
+                        Archive
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        </li>
     );
 }
 

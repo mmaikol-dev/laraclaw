@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { BookOpen, FolderGit2, FolderOpen, LayoutGrid, ListChecks, MessageSquare, SlidersHorizontal } from 'lucide-react';
+import { BookOpen, FolderGit2, FolderOpen, LayoutGrid, ListChecks, MessageSquare, SlidersHorizontal, Zap } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
@@ -18,6 +18,7 @@ import { index as chat } from '@/routes/chat';
 import { edit as editAgentSettings } from '@/routes/agent-settings';
 import { index as files } from '@/routes/files';
 import { index as tasks } from '@/routes/tasks';
+import { index as skills } from '@/routes/skills';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
@@ -40,6 +41,11 @@ const mainNavItems: NavItem[] = [
         title: 'Tasks',
         href: tasks(),
         icon: ListChecks,
+    },
+    {
+        title: 'Skills',
+        href: skills(),
+        icon: Zap,
     },
     {
         title: 'Agent settings',

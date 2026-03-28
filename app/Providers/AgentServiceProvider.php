@@ -11,6 +11,7 @@ use App\Services\Embedding\VectorStore;
 use App\Services\Tools\DocumentTool;
 use App\Services\Tools\FileTool;
 use App\Services\Tools\ShellTool;
+use App\Services\Tools\SkillTool;
 use App\Services\Tools\WebTool;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Support\ServiceProvider;
@@ -22,12 +23,12 @@ class AgentServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(OllamaService::class, fn (): OllamaService => new OllamaService());
+        $this->app->singleton(OllamaService::class, fn (): OllamaService => new OllamaService);
         $this->app->singleton(
             AgentRunState::class,
             fn ($app): AgentRunState => new AgentRunState($app->make(CacheFactory::class)->store('file')),
         );
-        $this->app->singleton(VectorStore::class, fn (): VectorStore => new VectorStore());
+        $this->app->singleton(VectorStore::class, fn (): VectorStore => new VectorStore);
         $this->app->singleton(
             EmbeddingService::class,
             fn ($app): EmbeddingService => new EmbeddingService(
@@ -36,11 +37,12 @@ class AgentServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singleton(ToolRegistry::class, function ($app): ToolRegistry {
-            $registry = new ToolRegistry();
-            $registry->register(new FileTool());
-            $registry->register(new ShellTool());
-            $registry->register(new WebTool());
+            $registry = new ToolRegistry;
+            $registry->register(new FileTool);
+            $registry->register(new ShellTool);
+            $registry->register(new WebTool);
             $registry->register(new DocumentTool($app->make(EmbeddingService::class)));
+            $registry->register(new SkillTool);
 
             return $registry;
         });

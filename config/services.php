@@ -35,10 +35,9 @@ return [
         ],
     ],
 
-    'brave' => [
-        'api_key' => env('BRAVE_API_KEY', ''),
-        'endpoint' => env('BRAVE_SEARCH_ENDPOINT', 'https://api.search.brave.com/res/v1/web/search'),
-        'max_results' => (int) env('BRAVE_MAX_RESULTS', 5),
+    'tavily' => [
+        'api_key' => env('TAVILY_API_KEY', ''),
+        'base_url' => env('TAVILY_BASE_URL', 'https://api.tavily.com'),
     ],
 
 ];
