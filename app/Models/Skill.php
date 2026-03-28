@@ -5,6 +5,7 @@ namespace App\Models;
 use Database\Factories\SkillFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Skill extends Model
 {
@@ -38,6 +39,11 @@ class Skill extends Model
         'communication',
         'general',
     ];
+
+    public function scripts(): HasMany
+    {
+        return $this->hasMany(SkillScript::class);
+    }
 
     public function incrementUsage(): void
     {

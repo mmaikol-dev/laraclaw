@@ -7,6 +7,7 @@ import {
     Code2,
     Database,
     Edit3,
+    FileCode2,
     FlaskConical,
     Globe,
     LayoutGrid,
@@ -28,6 +29,13 @@ import AppLayout from '@/layouts/app-layout';
 import { index as skillsRoute } from '@/routes/skills';
 import type { BreadcrumbItem } from '@/types';
 
+type SkillScript = {
+    id: number;
+    filename: string;
+    description: string;
+    content: string;
+};
+
 type Skill = {
     id: number;
     name: string;
@@ -37,6 +45,7 @@ type Skill = {
     is_active: boolean;
     created_by: 'user' | 'agent';
     usage_count: number;
+    scripts: SkillScript[];
     created_at: string | null;
     updated_at: string | null;
 };
@@ -60,15 +69,26 @@ const CATEGORY_META: Record<string, { icon: React.ElementType; color: string; bg
 };
 
 const EMPTY_FORM = { name: '', description: '', category: 'general', instructions: '', is_active: true };
+const EMPTY_SCRIPT_FORM = { filename: '', description: '', content: '' };
 
 export default function SkillsIndex({ skills, categories }: Props) {
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+    // skill modal state
     const [showForm, setShowForm] = useState(false);
     const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
     const [form, setForm] = useState(EMPTY_FORM);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [saving, setSaving] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
+
+    // script modal state (lifted here so modal renders outside Collapsible)
+    const [scriptForm, setScriptForm] = useState<typeof EMPTY_SCRIPT_FORM | null>(null);
+    const [scriptSkillId, setScriptSkillId] = useState<number | null>(null);
+    const [editingScript, setEditingScript] = useState<SkillScript | null>(null);
+    const [scriptErrors, setScriptErrors] = useState<Record<string, string>>({});
+    const [savingScript, setSavingScript] = useState(false);
+    const [deletingScriptId, setDeletingScriptId] = useState<number | null>(null);
 
     const filtered = selectedCategory ? skills.filter((s) => s.category === selectedCategory) : skills;
 
@@ -163,6 +183,74 @@ export default function SkillsIndex({ skills, categories }: Props) {
             body: JSON.stringify({ is_active: !skill.is_active }),
         });
         router.reload({ only: ['skills'] });
+    }
+
+    function openAddScript(skill: Skill): void {
+        setScriptSkillId(skill.id);
+        setEditingScript(null);
+        setScriptForm(EMPTY_SCRIPT_FORM);
+        setScriptErrors({});
+    }
+
+    function openEditScript(skill: Skill, script: SkillScript): void {
+        setScriptSkillId(skill.id);
+        setEditingScript(script);
+        setScriptForm({ filename: script.filename, description: script.description, content: script.content });
+        setScriptErrors({});
+    }
+
+    function closeScriptForm(): void {
+        setScriptForm(null);
+        setScriptSkillId(null);
+        setEditingScript(null);
+        setScriptErrors({});
+    }
+
+    async function handleSaveScript(): Promise<void> {
+        if (!scriptForm || !scriptSkillId) { return; }
+        setScriptErrors({});
+        setSavingScript(true);
+        try {
+            const url = editingScript
+                ? `/api/v1/skills/${scriptSkillId}/scripts/${editingScript.id}`
+                : `/api/v1/skills/${scriptSkillId}/scripts`;
+            const method = editingScript ? 'PUT' : 'POST';
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+                body: JSON.stringify(scriptForm),
+            });
+            if (res.status === 422) {
+                const body = await res.json() as { errors: Record<string, string[]> };
+                const flat: Record<string, string> = {};
+                for (const [key, msgs] of Object.entries(body.errors)) {
+                    flat[key] = msgs[0] ?? '';
+                }
+                setScriptErrors(flat);
+                return;
+            }
+            if (!res.ok) { throw new Error('Save failed'); }
+            closeScriptForm();
+            router.reload({ only: ['skills'] });
+        } catch {
+            setScriptErrors({ general: 'Failed to save script. Please try again.' });
+        } finally {
+            setSavingScript(false);
+        }
+    }
+
+    async function handleDeleteScript(skill: Skill, script: SkillScript): Promise<void> {
+        if (!confirm(`Delete script "${script.filename}"?`)) { return; }
+        setDeletingScriptId(script.id);
+        try {
+            await fetch(`/api/v1/skills/${skill.id}/scripts/${script.id}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRF-TOKEN': csrfToken() },
+            });
+            router.reload({ only: ['skills'] });
+        } finally {
+            setDeletingScriptId(null);
+        }
     }
 
     return (
@@ -270,6 +358,10 @@ export default function SkillsIndex({ skills, categories }: Props) {
                                         onDelete={() => void handleDelete(skill)}
                                         onToggle={() => void handleToggle(skill)}
                                         deleting={deletingId === skill.id}
+                                        onAddScript={() => openAddScript(skill)}
+                                        onEditScript={(script) => openEditScript(skill, script)}
+                                        onDeleteScript={(script) => void handleDeleteScript(skill, script)}
+                                        deletingScriptId={deletingScriptId}
                                     />
                                 ))}
                             </div>
@@ -278,7 +370,7 @@ export default function SkillsIndex({ skills, categories }: Props) {
                 </div>
             </div>
 
-            {/* ── Create / Edit modal ── */}
+            {/* ── Create / Edit skill modal ── */}
             {showForm && (
                 <SkillFormModal
                     form={form}
@@ -289,6 +381,19 @@ export default function SkillsIndex({ skills, categories }: Props) {
                     onChange={(field, value) => setForm((f) => ({ ...f, [field]: value }))}
                     onSave={() => void handleSave()}
                     onClose={closeForm}
+                />
+            )}
+
+            {/* ── Create / Edit script modal ── */}
+            {scriptForm !== null && (
+                <ScriptFormModal
+                    form={scriptForm}
+                    errors={scriptErrors}
+                    isEdit={editingScript !== null}
+                    saving={savingScript}
+                    onChange={(field, value) => setScriptForm((f) => f ? { ...f, [field]: value } : f)}
+                    onSave={() => void handleSaveScript()}
+                    onClose={closeScriptForm}
                 />
             )}
         </AppLayout>
@@ -303,80 +408,241 @@ function SkillCard({
     onDelete,
     onToggle,
     deleting,
+    onAddScript,
+    onEditScript,
+    onDeleteScript,
+    deletingScriptId,
 }: {
     skill: Skill;
     onEdit: () => void;
     onDelete: () => void;
     onToggle: () => void;
     deleting: boolean;
+    onAddScript: () => void;
+    onEditScript: (script: SkillScript) => void;
+    onDeleteScript: (script: SkillScript) => void;
+    deletingScriptId: number | null;
 }) {
     const meta = CATEGORY_META[skill.category] ?? CATEGORY_META.general;
     const Icon = meta.icon;
 
     return (
         <Collapsible>
-            <div className={`overflow-hidden rounded-xl border transition-opacity ${!skill.is_active ? 'opacity-60' : ''}`}>
-                {/* Header row */}
-                <div className="flex items-center gap-3 px-4 py-3">
-                    <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${meta.bg}`}>
-                        <Icon className={`size-4 ${meta.color}`} />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                            <span className="truncate font-medium text-sm">{skill.name}</span>
-                            {skill.created_by === 'agent' && (
-                                <Badge variant="secondary" className="gap-1 text-[10px] py-0">
-                                    <Bot className="size-2.5" />
-                                    AI
-                                </Badge>
-                            )}
-                            {skill.created_by === 'user' && (
-                                <Badge variant="outline" className="gap-1 text-[10px] py-0">
-                                    <User className="size-2.5" />
-                                    You
-                                </Badge>
-                            )}
-                            <Badge
-                                variant={skill.is_active ? 'default' : 'secondary'}
-                                className={`ml-auto text-[10px] py-0 ${skill.is_active ? 'bg-teal-600' : ''}`}
-                            >
-                                {skill.is_active ? 'Active' : 'Inactive'}
-                            </Badge>
+                <div className={`overflow-hidden rounded-xl border transition-opacity ${!skill.is_active ? 'opacity-60' : ''}`}>
+                    {/* Header row */}
+                    <div className="flex items-center gap-3 px-4 py-3">
+                        <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${meta.bg}`}>
+                            <Icon className={`size-4 ${meta.color}`} />
                         </div>
-                        <p className="truncate text-xs text-muted-foreground">{skill.description}</p>
+
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                                <span className="truncate font-medium text-sm">{skill.name}</span>
+                                {skill.created_by === 'agent' && (
+                                    <Badge variant="secondary" className="gap-1 text-[10px] py-0">
+                                        <Bot className="size-2.5" />
+                                        AI
+                                    </Badge>
+                                )}
+                                {skill.created_by === 'user' && (
+                                    <Badge variant="outline" className="gap-1 text-[10px] py-0">
+                                        <User className="size-2.5" />
+                                        You
+                                    </Badge>
+                                )}
+                                <Badge
+                                    variant={skill.is_active ? 'default' : 'secondary'}
+                                    className={`ml-auto text-[10px] py-0 ${skill.is_active ? 'bg-teal-600' : ''}`}
+                                >
+                                    {skill.is_active ? 'Active' : 'Inactive'}
+                                </Badge>
+                            </div>
+                            <p className="truncate text-xs text-muted-foreground">{skill.description}</p>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-1">
+                            {skill.usage_count > 0 && (
+                                <span className="text-[10px] text-muted-foreground/60">{skill.usage_count}×</span>
+                            )}
+                            <Button variant="ghost" size="icon" className="size-7" onClick={onToggle} title={skill.is_active ? 'Deactivate' : 'Activate'}>
+                                <Settings2 className="size-3.5 text-muted-foreground" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="size-7" onClick={onEdit}>
+                                <Pencil className="size-3.5 text-muted-foreground" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="size-7" onClick={onDelete} disabled={deleting}>
+                                <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+                            </Button>
+                            <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="icon" className="size-7">
+                                    <ChevronDown className="size-3.5 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
+                                </Button>
+                            </CollapsibleTrigger>
+                        </div>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-1">
-                        {skill.usage_count > 0 && (
-                            <span className="text-[10px] text-muted-foreground/60">{skill.usage_count}×</span>
-                        )}
-                        <Button variant="ghost" size="icon" className="size-7" onClick={onToggle} title={skill.is_active ? 'Deactivate' : 'Activate'}>
-                            <Settings2 className="size-3.5 text-muted-foreground" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="size-7" onClick={onEdit}>
-                            <Pencil className="size-3.5 text-muted-foreground" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="size-7" onClick={onDelete} disabled={deleting}>
-                            <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-                        </Button>
-                        <CollapsibleTrigger asChild>
-                            <Button variant="ghost" size="icon" className="size-7">
-                                <ChevronDown className="size-3.5 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
-                            </Button>
-                        </CollapsibleTrigger>
+                    {/* Expandable instructions + scripts */}
+                    <CollapsibleContent>
+                        <div className="border-t bg-muted/30 px-4 py-3">
+                            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Instructions</p>
+                            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground">{skill.instructions}</pre>
+                        </div>
+
+                        <div className="border-t bg-amber-50/40 px-4 py-3 dark:bg-amber-950/20">
+                            <div className="mb-2 flex items-center justify-between">
+                                <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    <FileCode2 className="size-3 text-amber-500" />
+                                    Scripts {skill.scripts.length > 0 && `(${skill.scripts.length})`}
+                                </p>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 gap-1 px-2 text-[11px] text-amber-600 hover:bg-amber-100 hover:text-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/40"
+                                    onClick={onAddScript}
+                                >
+                                    <Plus className="size-3" />
+                                    Add script
+                                </Button>
+                            </div>
+
+                            {skill.scripts.length === 0 ? (
+                                <p className="text-[11px] text-muted-foreground/70">
+                                    No scripts yet. Scripts are files the agent can run as part of this skill — Python, Bash, JavaScript, etc.
+                                </p>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    {skill.scripts.map((script) => (
+                                        <div
+                                            key={script.id}
+                                            className="flex items-center gap-2 rounded-lg border border-amber-200/60 bg-white/60 px-3 py-2 dark:border-amber-800/40 dark:bg-amber-950/30"
+                                        >
+                                            <FileCode2 className="size-3.5 shrink-0 text-amber-500" />
+                                            <div className="min-w-0 flex-1">
+                                                <span className="font-mono text-xs font-medium text-amber-700 dark:text-amber-300">{script.filename}</span>
+                                                {script.description && (
+                                                    <p className="truncate text-[11px] text-muted-foreground">{script.description}</p>
+                                                )}
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-0.5">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="size-6 text-muted-foreground hover:text-foreground"
+                                                    onClick={() => onEditScript(script)}
+                                                >
+                                                    <Pencil className="size-3" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="size-6 text-muted-foreground hover:text-destructive"
+                                                    onClick={() => onDeleteScript(script)}
+                                                    disabled={deletingScriptId === script.id}
+                                                >
+                                                    <Trash2 className="size-3" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </CollapsibleContent>
+                </div>
+            </Collapsible>
+    );
+}
+
+// ── Script form modal ─────────────────────────────────────────────────────────
+
+function ScriptFormModal({
+    form,
+    errors,
+    isEdit,
+    saving,
+    onChange,
+    onSave,
+    onClose,
+}: {
+    form: typeof EMPTY_SCRIPT_FORM;
+    errors: Record<string, string>;
+    isEdit: boolean;
+    saving: boolean;
+    onChange: (field: string, value: string) => void;
+    onSave: () => void;
+    onClose: () => void;
+}) {
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b px-5 py-4">
+                    <div className="flex items-center gap-2">
+                        <FileCode2 className="size-4 text-amber-500" />
+                        <h2 className="font-semibold">{isEdit ? 'Edit script' : 'Add script'}</h2>
+                    </div>
+                    <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                        <X className="size-4" />
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto space-y-4 px-5 py-4">
+                    {errors.general && (
+                        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{errors.general}</p>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="col-span-2 sm:col-span-1">
+                            <label className="mb-1.5 block text-xs font-medium">Filename</label>
+                            <input
+                                value={form.filename}
+                                onChange={(e) => onChange('filename', e.target.value)}
+                                placeholder="e.g. extract.py, run.sh, process.js"
+                                className="w-full rounded-xl border bg-muted/30 px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-amber-500/40"
+                            />
+                            {errors.filename && <p className="mt-1 text-xs text-destructive">{errors.filename}</p>}
+                        </div>
+
+                        <div className="col-span-2 sm:col-span-1">
+                            <label className="mb-1.5 block text-xs font-medium">Description <span className="font-normal text-muted-foreground">(optional)</span></label>
+                            <input
+                                value={form.description}
+                                onChange={(e) => onChange('description', e.target.value)}
+                                placeholder="What does this script do?"
+                                className="w-full rounded-xl border bg-muted/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500/40"
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium">Content</label>
+                        <textarea
+                            value={form.content}
+                            onChange={(e) => onChange('content', e.target.value)}
+                            rows={18}
+                            spellCheck={false}
+                            placeholder="#!/usr/bin/env python3&#10;# Script content here..."
+                            className="w-full rounded-xl border bg-zinc-950 px-4 py-3 font-mono text-xs leading-relaxed text-zinc-100 outline-none focus:ring-2 focus:ring-amber-500/40 dark:bg-zinc-900"
+                        />
+                        {errors.content && <p className="mt-1 text-xs text-destructive">{errors.content}</p>}
                     </div>
                 </div>
 
-                {/* Expandable instructions */}
-                <CollapsibleContent>
-                    <div className="border-t bg-muted/30 px-4 py-3">
-                        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Instructions</p>
-                        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground">{skill.instructions}</pre>
-                    </div>
-                </CollapsibleContent>
+                {/* Footer */}
+                <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
+                    <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+                    <Button
+                        size="sm"
+                        onClick={onSave}
+                        disabled={saving}
+                        className="bg-amber-600 hover:bg-amber-700"
+                    >
+                        {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add script'}
+                    </Button>
+                </div>
             </div>
-        </Collapsible>
+        </div>
     );
 }
 

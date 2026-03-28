@@ -3,6 +3,9 @@
 namespace App\Services\Tools;
 
 use App\Models\Skill;
+use App\Models\SkillScript;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\File;
 use RuntimeException;
 
 class SkillTool extends BaseTool
@@ -108,7 +111,7 @@ class SkillTool extends BaseTool
             throw new RuntimeException('Skill name is required.');
         }
 
-        $skill = Skill::where('name', $name)->first();
+        $skill = Skill::with('scripts')->where('name', $name)->first();
 
         if ($skill === null) {
             throw new RuntimeException("Skill '{$name}' not found.");
@@ -116,7 +119,7 @@ class SkillTool extends BaseTool
 
         $skill->incrementUsage();
 
-        return sprintf(
+        $output = sprintf(
             "=== %s ===\nCategory: %s\nDescription: %s\nCreated by: %s\nUsed: %d times\n\n--- Instructions ---\n%s",
             $skill->name,
             $skill->category,
@@ -125,6 +128,27 @@ class SkillTool extends BaseTool
             $skill->usage_count,
             $skill->instructions,
         );
+
+        /** @var Collection<int, SkillScript> $scripts */
+        $scripts = $skill->scripts;
+
+        if ($scripts->isNotEmpty()) {
+            $skillDir = storage_path('app/skills/'.preg_replace('/[^a-zA-Z0-9_\-]/', '_', $skill->name));
+            File::ensureDirectoryExists($skillDir);
+
+            $scriptLines = [];
+
+            foreach ($scripts as $script) {
+                $filePath = $skillDir.'/'.$script->filename;
+                File::put($filePath, $script->content);
+                $scriptLines[] = sprintf('  - %s: %s (written to %s)', $script->filename, $script->description, $filePath);
+            }
+
+            $output .= "\n\n--- Scripts (written to disk) ---\n".implode("\n", $scriptLines);
+            $output .= "\n\nScripts directory: {$skillDir}";
+        }
+
+        return $output;
     }
 
     /**

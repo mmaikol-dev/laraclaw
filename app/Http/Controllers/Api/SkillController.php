@@ -11,7 +11,7 @@ class SkillController extends Controller
 {
     public function index(): JsonResponse
     {
-        $skills = Skill::query()
+        $skills = Skill::with('scripts')
             ->orderByDesc('usage_count')
             ->orderBy('name')
             ->get();
