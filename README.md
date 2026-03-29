@@ -40,11 +40,19 @@ It figures out what tools to use, uses them, and reports back — without asking
 | **File** | Browse folders, read and write files anywhere on your machine |
 | **Shell** | Run any shell command and get the output |
 | **Web** | Search the web, extract content from URLs, crawl sites (via Tavily) |
+| **Browser** | Control a real Chrome window — navigate, click, fill forms, screenshot, extract text |
 | **Document** | Index and semantically search local documents |
 | **Skill** | Read, create, and update its own skills (self-improvement) |
 
+### Browser automation
+The agent controls a real Chrome window using CDP (Chrome DevTools Protocol). Visual feedback is shown directly in the browser:
+- **Orange ripple** — flashes at the exact pixel where it clicks
+- **Typing banner** — shows what the agent is typing (top-right corner)
+
+You can connect it to your own running Chrome (with your logins and cookies) or let it open a fresh window automatically. See [Browser automation](#browser-automation-1) below.
+
 ### Skills system
-The agent has a library of reusable skills — step-by-step instructions it follows for specific types of tasks (coding, research, writing, etc.). You can create skills yourself, or the agent can write new ones and update existing ones as it learns better approaches. Skills are automatically injected into every conversation so the agent always knows what it's capable of.
+The agent has a library of reusable skills — step-by-step instructions it follows for specific types of tasks (coding, research, writing, etc.). Skills can also include scripts in any language (Python, Bash, Node.js, etc.) that are written to disk when the skill is loaded. You can create skills yourself, or the agent can write new ones and update existing ones as it learns better approaches. Skills are automatically injected into every conversation so the agent always knows what it's capable of.
 
 ### Chat UI
 - Conversation list sidebar — all your chats in one place
@@ -80,39 +88,34 @@ The agent has a library of reusable skills — step-by-step instructions it foll
 | Agent model | `glm-5:cloud` (default) |
 | Embeddings | `qwen3-embedding:0.6b` |
 | Web search | Tavily API |
+| Browser automation | Playwright + Chrome DevTools Protocol |
 | Database | MySQL 8 |
 
 ---
 
-## Quick start (Docker)
+## Quick start
 
-The easiest way — requires only [Docker Desktop](https://www.docker.com/products/docker-desktop).
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/you/laraclaw/main/install.sh | bash
-```
-
-Then open **http://localhost:8080**.
-
-That's it. The installer handles everything — PHP, MySQL, Ollama, and model downloads.
-
-> **First run** downloads the AI models (~4 GB). This only happens once — models are cached in a Docker volume and reused on every restart.
-
-### Managing the Docker install
+One command installs everything on Ubuntu/Debian:
 
 ```bash
-# Start
-docker compose up -d
-
-# Stop
-docker compose down
-
-# View logs
-docker compose logs -f
-
-# Update to latest version
-git pull && docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/mmaikol-dev/laraclaw/main/install.sh | bash
 ```
+
+The installer will ask you a few questions (database credentials, which AI model to use, app port) then handle everything automatically:
+
+- PHP 8.3, Composer
+- Node.js 20
+- MySQL (creates the database and user)
+- Python 3 + Playwright + browser dependencies
+- Google Chrome
+- Ollama + your chosen LLM model + embedding model
+- The LaraClaw app (clone, dependencies, migrations, build)
+- Systemd autostart services (starts on every login)
+- Desktop autostart (Chrome opens at the app URL on login)
+
+> **Model download** — pulling the AI models takes a few minutes depending on your internet speed. This only happens once.
+
+Then open **http://localhost:8100**.
 
 ---
 
@@ -148,7 +151,66 @@ ollama pull qwen3-embedding:0.6b
 composer run dev
 ```
 
-Open **http://localhost:8000**.
+Open **http://localhost:8100**.
+
+---
+
+## Autostart on boot
+
+LaraClaw can start automatically when you log in using systemd user services.
+
+```bash
+# Enable autostart
+systemctl --user enable laraclaw-server laraclaw-queue
+
+# Start now
+systemctl --user start laraclaw-server laraclaw-queue
+
+# Stop
+systemctl --user stop laraclaw-server laraclaw-queue
+
+# Restart (e.g. after .env changes)
+systemctl --user restart laraclaw-server laraclaw-queue
+
+# View live logs
+journalctl --user -u laraclaw-server -f
+journalctl --user -u laraclaw-queue -f
+```
+
+Chrome also opens automatically at **http://localhost:8100** on login via `~/.config/autostart/laraclaw.desktop`.
+
+### When making changes
+
+| Change type | Action needed |
+|-------------|---------------|
+| PHP files (controllers, models, routes) | Just refresh the browser — no restart needed |
+| Frontend (React, CSS, TypeScript) | Run `npm run build` |
+| `.env` changes | `systemctl --user restart laraclaw-server` |
+| Active frontend development | Stop services → `composer run dev` → start services when done |
+
+---
+
+## Browser automation
+
+The agent controls a real Chrome window. Two modes are supported:
+
+### Automatic (default)
+Leave `CHROME_CDP_PORT` empty in `.env`. The agent launches its own Chrome window using your system Chrome (`/usr/bin/google-chrome`).
+
+### Connect to your own Chrome (recommended)
+Lets the agent use your existing session — you're already logged into sites, your bookmarks and cookies are there.
+
+1. Relaunch Chrome with the remote debugging port:
+   ```bash
+   google-chrome --remote-debugging-port=9222
+   ```
+
+2. Set in `.env`:
+   ```env
+   CHROME_CDP_PORT=9222
+   ```
+
+The agent will attach to your running Chrome instead of opening a new window. The `close` browser action won't kill your Chrome when using this mode.
 
 ---
 
@@ -157,6 +219,9 @@ Open **http://localhost:8000**.
 All settings are in `.env`. The important ones:
 
 ```env
+# App port
+APP_PORT=8100
+
 # Which model the agent uses
 OLLAMA_AGENT_MODEL=glm-5:cloud
 
@@ -176,6 +241,11 @@ TAVILY_API_KEY=tvly-...
 
 # Shell command timeout in seconds
 AGENT_SHELL_TIMEOUT=30
+
+# Browser automation
+BROWSER_HEADED=true
+# Set to connect to your own Chrome (launch Chrome with --remote-debugging-port=9222)
+CHROME_CDP_PORT=
 ```
 
 You can also change the agent's system prompt, model, and temperature from the **Agent Settings** page in the UI.

@@ -151,7 +151,10 @@ class BrowserTool extends BaseTool
         $process = new Process(
             ['python3', $this->agentScript, $payload],
             null,
-            array_merge(getenv(), ['BROWSER_HEADED' => config('services.browser.headed', 'true')]),
+            array_merge(getenv(), [
+                'BROWSER_HEADED' => config('services.browser.headed', 'true'),
+                'CHROME_CDP_PORT' => (string) config('services.browser.cdp_port', ''),
+            ]),
         );
 
         $process->setTimeout(60);
@@ -346,10 +349,41 @@ def _find_free_port():
     raise RuntimeError('No free port in range 9200-9300')
 
 
-def _chromium_path():
+def _find_chrome_exe():
+    """Return the best Chrome/Chromium binary available, preferring system Chrome."""
+    import shutil
+    # Check absolute paths first (reliable when $PATH is restricted)
+    absolute_candidates = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/usr/local/bin/google-chrome',
+        '/snap/bin/chromium',
+    ]
+    for path in absolute_candidates:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    # Try PATH-based lookup as fallback
+    for name in ('google-chrome', 'google-chrome-stable', 'chromium-browser', 'chromium'):
+        path = shutil.which(name)
+        if path:
+            return path
+    # Last resort: Playwright's bundled Chromium
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         return pw.chromium.executable_path
+
+
+def _port_open(port):
+    """Return True if something is already listening on localhost:port."""
+    try:
+        with socket.socket() as s:
+            s.settimeout(0.5)
+            s.connect(('127.0.0.1', int(port)))
+        return True
+    except OSError:
+        return False
 
 
 def _wait_for_port(port, retries=50, delay=0.3):
@@ -378,19 +412,36 @@ def _run(payload):
     os.makedirs(ssdir, exist_ok=True)
     meta    = _load_meta(sid)
     headed  = os.environ.get('BROWSER_HEADED', 'true').lower() != 'false'
+    cdp_env = os.environ.get('CHROME_CDP_PORT', '').strip()
 
     # ── launch ───────────────────────────────────────────────────────────────
     if action == 'launch':
+        start_url = par.get('url', 'about:blank')
+
+        # Option A: user has Chrome running with --remote-debugging-port=NNNN
+        if cdp_env and _port_open(cdp_env):
+            port = int(cdp_env)
+            meta = {'pid': None, 'port': port, 'url': start_url, 'external': True}
+            _save_meta(sid, meta)
+            return {
+                'status': 'connected',
+                'session_id': sid,
+                'port': port,
+                'url': start_url,
+                'note': f'Attached to your running Chrome on port {port}.',
+            }
+
         # Kill previous session if still alive
-        if 'pid' in meta and _alive(meta['pid']):
+        if meta.get('pid') and _alive(meta['pid']):
             try:
                 os.kill(int(meta['pid']), signal.SIGTERM)
             except Exception:
                 pass
             time.sleep(0.5)
 
-        port = _find_free_port()
-        exe  = _chromium_path()
+        # Option B: launch system Chrome (or fallback to Playwright Chromium)
+        port = int(cdp_env) if cdp_env else _find_free_port()
+        exe  = _find_chrome_exe()
         cmd  = [
             exe,
             f'--remote-debugging-port={port}',
@@ -402,8 +453,6 @@ def _run(payload):
         ]
         if not headed:
             cmd.append('--headless')
-
-        start_url = par.get('url', 'about:blank')
         cmd.append(start_url)
 
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -411,7 +460,7 @@ def _run(payload):
         if not _wait_for_port(port):
             return {'error': 'Chrome did not start in time'}
 
-        meta = {'pid': proc.pid, 'port': port, 'url': start_url}
+        meta = {'pid': proc.pid, 'port': port, 'url': start_url, 'external': False}
         _save_meta(sid, meta)
         return {
             'status': 'launched',
@@ -420,6 +469,7 @@ def _run(payload):
             'port': port,
             'url': start_url,
             'headed': headed,
+            'exe': exe,
         }
 
     # ── all other actions need an existing session ────────────────────────────
@@ -438,35 +488,41 @@ def _run(payload):
             needs_launch = True
 
     if needs_launch:
-        # Kill stale process if any
-        if pid and _alive(pid):
-            try:
-                os.kill(int(pid), signal.SIGTERM)
-            except Exception:
-                pass
-            time.sleep(0.3)
+        # Check if the user's own Chrome is available first
+        if cdp_env and _port_open(cdp_env):
+            port = int(cdp_env)
+            meta = {'pid': None, 'port': port, 'url': meta.get('url', 'about:blank'), 'external': True}
+            _save_meta(sid, meta)
+        else:
+            # Kill stale process if any
+            if pid and _alive(pid):
+                try:
+                    os.kill(int(pid), signal.SIGTERM)
+                except Exception:
+                    pass
+                time.sleep(0.3)
 
-        port = _find_free_port()
-        exe  = _chromium_path()
-        cmd  = [
-            exe,
-            f'--remote-debugging-port={port}',
-            '--no-sandbox',
-            '--disable-dev-shm-usage',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--user-data-dir=' + os.path.join(sdir, 'profile'),
-        ]
-        if not headed:
-            cmd.append('--headless')
-        cmd.append('about:blank')
+            port = int(cdp_env) if cdp_env else _find_free_port()
+            exe  = _find_chrome_exe()
+            cmd  = [
+                exe,
+                f'--remote-debugging-port={port}',
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--user-data-dir=' + os.path.join(sdir, 'profile'),
+            ]
+            if not headed:
+                cmd.append('--headless')
+            cmd.append('about:blank')
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if not _wait_for_port(port):
-            return {'error': 'Chrome could not be started automatically.'}
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if not _wait_for_port(port):
+                return {'error': 'Chrome could not be started automatically.'}
 
-        meta = {'pid': proc.pid, 'port': port, 'url': 'about:blank'}
-        _save_meta(sid, meta)
+            meta = {'pid': proc.pid, 'port': port, 'url': 'about:blank', 'external': False}
+            _save_meta(sid, meta)
 
     with sync_playwright() as pw:
         try:
@@ -620,7 +676,7 @@ def _run(payload):
 
             elif action == 'close':
                 pid = meta.get('pid')
-                if pid and _alive(pid):
+                if pid and not meta.get('external') and _alive(pid):
                     os.kill(int(pid), signal.SIGTERM)
                 meta = {}
                 res  = {'closed': True, 'session_id': sid}

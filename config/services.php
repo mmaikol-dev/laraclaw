@@ -42,6 +42,7 @@ return [
 
     'browser' => [
         'headed' => env('BROWSER_HEADED', 'true'),
+        'cdp_port' => env('CHROME_CDP_PORT', ''),
     ],
 
 ];
