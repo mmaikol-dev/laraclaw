@@ -42,6 +42,14 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+            console.error('[LaraClaw] Service worker registration failed:', error);
+        });
+    });
+}
+
 createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
     resolve: (name) =>

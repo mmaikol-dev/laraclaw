@@ -1,5 +1,6 @@
 import { Head } from '@inertiajs/react';
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { VoiceInput } from '@/components/voice-input';
 import {
     Archive,
     Bot,
@@ -419,6 +420,10 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
         }
     }
 
+    const handleVoiceTranscript = useCallback((text: string) => {
+        setMessage((prev) => (prev ? prev + ' ' + text : text));
+    }, []);
+
     function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
@@ -548,6 +553,11 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                     />
                                     <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
                                         <p className="text-[11px] text-muted-foreground/60">⏎ send · ⇧⏎ newline</p>
+                                        <div className="flex items-center gap-1.5">
+                                        <VoiceInput
+                                            onTranscript={handleVoiceTranscript}
+                                            disabled={isSending || isStreaming}
+                                        />
                                         {isStreaming ? (
                                             <Button
                                                 type="button"
@@ -569,6 +579,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                                 Send
                                             </Button>
                                         )}
+                                        </div>
                                     </div>
                                 </div>
                                 {error !== null && (

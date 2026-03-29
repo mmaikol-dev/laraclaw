@@ -365,14 +365,23 @@ systemctl --user start laraclaw-server laraclaw-queue
 # Allow services to run without an active login session
 loginctl enable-linger "$(whoami)"
 
-# Open Chrome on login
+# Open LaraClaw on login — use installed PWA if available, otherwise Chrome app mode
 mkdir -p ~/.config/autostart
+PWA_DESKTOP=$(grep -rl "localhost:${APP_PORT}\|laraclaw\|LaraClaw" ~/.local/share/applications/*.desktop 2>/dev/null | head -1)
+PWA_APP_ID=$(grep -oP '(?<=--app-id=)\S+' "$PWA_DESKTOP" 2>/dev/null || true)
+
+if [[ -n "$PWA_APP_ID" ]]; then
+    LAUNCH_CMD="/opt/google/chrome/google-chrome --profile-directory=Default --app-id=${PWA_APP_ID}"
+else
+    LAUNCH_CMD="google-chrome --app=http://localhost:${APP_PORT}"
+fi
+
 cat > ~/.config/autostart/laraclaw.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=LaraClaw
-Exec=bash -c "sleep 4 && google-chrome http://localhost:${APP_PORT}"
-Icon=google-chrome
+Exec=bash -c "sleep 4 && ${LAUNCH_CMD}"
+Icon=chrome-${PWA_APP_ID}-Default
 Hidden=false
 X-GNOME-Autostart-enabled=true
 EOF
@@ -390,7 +399,12 @@ ${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━�
   ${BOLD}Install:${NC}  ${INSTALL_DIR}
 
   ${CYAN}Open it now:${NC}
-  google-chrome http://localhost:${APP_PORT} &
+  google-chrome --app=http://localhost:${APP_PORT} &
+
+  ${CYAN}Install as PWA (recommended):${NC}
+  1. Open http://localhost:${APP_PORT} in Chrome
+  2. Click the install icon (⊕) in the address bar
+  3. LaraClaw will launch as a standalone app on every boot
 
   ${CYAN}Stop / Start:${NC}
   systemctl --user stop laraclaw-server laraclaw-queue

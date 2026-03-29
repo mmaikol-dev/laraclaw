@@ -154,6 +154,9 @@ class BrowserTool extends BaseTool
             array_merge(getenv(), [
                 'BROWSER_HEADED' => config('services.browser.headed', 'true'),
                 'CHROME_CDP_PORT' => (string) config('services.browser.cdp_port', ''),
+                'DISPLAY' => getenv('DISPLAY') ?: ':0',
+                'XAUTHORITY' => getenv('XAUTHORITY') ?: (getenv('HOME') ?: '/home/'.get_current_user()).'/.Xauthority',
+                'DBUS_SESSION_BUS_ADDRESS' => getenv('DBUS_SESSION_BUS_ADDRESS') ?: 'unix:path=/run/user/'.posix_getuid().'/bus',
             ]),
         );
 
@@ -354,11 +357,12 @@ def _find_chrome_exe():
     import shutil
     # Check absolute paths first (reliable when $PATH is restricted)
     absolute_candidates = [
+        '/opt/google/chrome/google-chrome',
         '/usr/bin/google-chrome',
         '/usr/bin/google-chrome-stable',
+        '/usr/local/bin/google-chrome',
         '/usr/bin/chromium-browser',
         '/usr/bin/chromium',
-        '/usr/local/bin/google-chrome',
         '/snap/bin/chromium',
     ]
     for path in absolute_candidates:
