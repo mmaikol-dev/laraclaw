@@ -134,7 +134,6 @@ class ConversationController extends Controller
 
         return response()->stream(function () use ($agent, $conversation, $messageText): void {
             set_time_limit(0);
-            ignore_user_abort(true);
 
             $this->emitStreamEvent('status', [
                 'status' => 'queued',
@@ -182,6 +181,13 @@ class ConversationController extends Controller
                 'title' => $conversation->title,
             ],
         ]);
+    }
+
+    public function cancelStream(Conversation $conversation): JsonResponse
+    {
+        $this->runState->cancel($conversation->id);
+
+        return response()->json(['status' => 'cancelled']);
     }
 
     public function destroy(Conversation $conversation): JsonResponse

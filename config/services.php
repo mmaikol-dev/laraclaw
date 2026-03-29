@@ -40,4 +40,8 @@ return [
         'base_url' => env('TAVILY_BASE_URL', 'https://api.tavily.com'),
     ],
 
+    'browser' => [
+        'headed' => env('BROWSER_HEADED', 'true'),
+    ],
+
 ];

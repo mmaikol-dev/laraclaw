@@ -8,6 +8,7 @@ use App\Services\Agent\OllamaService;
 use App\Services\Agent\ToolRegistry;
 use App\Services\Embedding\EmbeddingService;
 use App\Services\Embedding\VectorStore;
+use App\Services\Tools\BrowserTool;
 use App\Services\Tools\DocumentTool;
 use App\Services\Tools\FileTool;
 use App\Services\Tools\ShellTool;
@@ -41,6 +42,7 @@ class AgentServiceProvider extends ServiceProvider
             $registry->register(new FileTool);
             $registry->register(new ShellTool);
             $registry->register(new WebTool);
+            $registry->register(new BrowserTool);
             $registry->register(new DocumentTool($app->make(EmbeddingService::class)));
             $registry->register(new SkillTool);
 

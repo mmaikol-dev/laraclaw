@@ -146,9 +146,21 @@ class AgentRunState
         ]);
     }
 
+    public function cancel(int $conversationId): void
+    {
+        $this->cache->put($this->cancelKey($conversationId), true, Carbon::now()->addMinutes(5));
+        $this->fail($conversationId, 'Stopped by user.');
+    }
+
+    public function isCancelled(int $conversationId): bool
+    {
+        return (bool) $this->cache->get($this->cancelKey($conversationId), false);
+    }
+
     public function clear(int $conversationId): void
     {
         $this->cache->forget($this->key($conversationId));
+        $this->cache->forget($this->cancelKey($conversationId));
     }
 
     /**
@@ -177,6 +189,11 @@ class AgentRunState
     private function key(int $conversationId): string
     {
         return "agent-run-state:{$conversationId}";
+    }
+
+    private function cancelKey(int $conversationId): string
+    {
+        return "agent-run-cancelled:{$conversationId}";
     }
 
     /**

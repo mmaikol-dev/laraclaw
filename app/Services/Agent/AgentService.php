@@ -61,8 +61,15 @@ class AgentService
         $temperature = (float) AgentSetting::get('temperature', '0.7');
         $maxIterations = 300;
 
+        $cancelled = false;
+
         try {
             for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+                if ($this->runState->isCancelled($conversation->id)) {
+                    $cancelled = true;
+                    break;
+                }
+
                 $this->runState->markThinking($conversation->id);
                 $this->notify($listener, [
                     'type' => 'status',
@@ -317,7 +324,9 @@ class AgentService
 
         $assistantMessage = $conversation->messages()->create([
             'role' => 'assistant',
-            'content' => 'The agent reached its tool-iteration limit before finishing.',
+            'content' => $cancelled
+                ? 'Stopped by user.'
+                : 'The agent reached its tool-iteration limit before finishing.',
         ]);
         $this->runState->finish($conversation->id, $assistantMessage->id, [
             'tokens_per_second' => 0,

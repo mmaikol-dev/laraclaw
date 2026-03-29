@@ -14,6 +14,7 @@ Route::prefix('v1')->group(function () {
     Route::post('conversations', [ConversationController::class, 'store'])->name('api.conversations.store');
     Route::get('conversations/{conversation}', [ConversationController::class, 'show'])->name('api.conversations.show');
     Route::get('conversations/{conversation}/stream', [ConversationController::class, 'stream'])->name('api.conversations.stream');
+    Route::delete('conversations/{conversation}/stream', [ConversationController::class, 'cancelStream'])->name('api.conversations.stream.cancel');
     Route::post('conversations/{conversation}/messages', [ConversationController::class, 'sendMessage'])->name('api.conversations.messages.store');
     Route::post('conversations/{conversation}/messages/stream', [ConversationController::class, 'streamMessage'])->name('api.conversations.messages.stream');
     Route::patch('conversations/{conversation}/title', [ConversationController::class, 'updateTitle'])->name('api.conversations.title.update');

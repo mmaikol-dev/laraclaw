@@ -12,6 +12,7 @@ import {
     MoreHorizontal,
     PenSquare,
     SendHorizontal,
+    Square,
     Wrench,
     XCircle,
     Zap,
@@ -135,6 +136,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
     const [isStreaming, setIsStreaming] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         setActiveConversationId(conversationId);
@@ -228,11 +230,12 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
         });
     }
 
-    async function consumeStream(targetId: number, userMessage: string): Promise<void> {
+    async function consumeStream(targetId: number, userMessage: string, signal: AbortSignal): Promise<void> {
         const response = await fetch(`/api/v1/conversations/${targetId}/messages/stream`, {
             method: 'POST',
             headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: userMessage }),
+            signal,
         });
 
         if (!response.ok || response.body === null) {
@@ -357,12 +360,22 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
         }
     }
 
+    function handleStop(): void {
+        if (activeConversationId !== null) {
+            void api(`/conversations/${activeConversationId}/stream`, { method: 'DELETE' }).catch(() => {});
+        }
+        abortControllerRef.current?.abort();
+    }
+
     async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
         event.preventDefault();
         const trimmedMessage = message.trim();
         if (trimmedMessage === '') {
             return;
         }
+
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
 
         setIsSending(true);
         setIsStreaming(true);
@@ -383,12 +396,24 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
             }
 
             await loadConversation(targetId);
-            await consumeStream(targetId, trimmedMessage);
+            await consumeStream(targetId, trimmedMessage, controller.signal);
             setPendingUserMessage(null);
             await Promise.all([loadConversation(targetId), loadConversations()]);
-        } catch {
-            setError('Your message could not be sent.');
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                setPendingUserMessage(null);
+                setFeedEntries([]);
+                setLiveThinking('');
+                setLiveThinkingDone(false);
+                if (activeConversationId !== null) {
+                    const id = activeConversationId;
+                    setTimeout(() => void loadConversation(id), 300);
+                }
+            } else {
+                setError('Your message could not be sent.');
+            }
         } finally {
+            abortControllerRef.current = null;
             setIsSending(false);
             setIsStreaming(false);
         }
@@ -523,19 +548,27 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                     />
                                     <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
                                         <p className="text-[11px] text-muted-foreground/60">⏎ send · ⇧⏎ newline</p>
-                                        <Button
-                                            type="submit"
-                                            size="sm"
-                                            className="h-8 gap-1.5 rounded-xl bg-teal-600 px-3 text-xs hover:bg-teal-700"
-                                            disabled={isSending || message.trim() === ''}
-                                        >
-                                            {isSending ? (
-                                                <LoaderCircle className="size-3.5 animate-spin" />
-                                            ) : (
+                                        {isStreaming ? (
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                onClick={handleStop}
+                                                className="h-8 gap-1.5 rounded-xl bg-red-600 px-3 text-xs hover:bg-red-700"
+                                            >
+                                                <Square className="size-3 fill-current" />
+                                                Stop
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                type="submit"
+                                                size="sm"
+                                                className="h-8 gap-1.5 rounded-xl bg-teal-600 px-3 text-xs hover:bg-teal-700"
+                                                disabled={isSending || message.trim() === ''}
+                                            >
                                                 <SendHorizontal className="size-3.5" />
-                                            )}
-                                            Send
-                                        </Button>
+                                                Send
+                                            </Button>
+                                        )}
                                     </div>
                                 </div>
                                 {error !== null && (
