@@ -41,10 +41,10 @@ fi
 # ── interactive config ────────────────────────────────────────────────────────
 step "Configuration"
 
-read -rp "$(echo -e "${BOLD}Install directory${NC} [${INSTALL_DIR}]: ")" input
+read -rp "$(echo -e "${BOLD}Install directory${NC} [${INSTALL_DIR}]: ")" input </dev/tty
 INSTALL_DIR="${input:-$INSTALL_DIR}"
 
-read -rp "$(echo -e "${BOLD}App port${NC} [${APP_PORT}]: ")" input
+read -rp "$(echo -e "${BOLD}App port${NC} [${APP_PORT}]: ")" input </dev/tty
 APP_PORT="${input:-$APP_PORT}"
 
 echo ""
@@ -74,7 +74,7 @@ echo "  18) gemini-2.0-flash:cloud   (Google Gemini 2.0 Flash)"
 echo "  19) gemini-2.5-pro:cloud     (Google Gemini 2.5 Pro)"
 echo "  20) Enter manually     (any model name from ollama.com/search)"
 echo ""
-read -rp "$(echo -e "${BOLD}Choice${NC} [1]: ")" model_choice
+read -rp "$(echo -e "${BOLD}Choice${NC} [1]: ")" model_choice </dev/tty
 case "${model_choice:-1}" in
     1)  AGENT_MODEL="llama3.2:3b" ;;
     2)  AGENT_MODEL="llama3.3:70b" ;;
@@ -95,22 +95,22 @@ case "${model_choice:-1}" in
     17) AGENT_MODEL="qwen-max:cloud" ;;
     18) AGENT_MODEL="gemini-2.0-flash:cloud" ;;
     19) AGENT_MODEL="gemini-2.5-pro:cloud" ;;
-    20) read -rp "Model name: " AGENT_MODEL ;;
+    20) read -rp "Model name: " AGENT_MODEL </dev/tty ;;
     *)  AGENT_MODEL="llama3.2:3b" ;;
 esac
 EMBEDDING_MODEL="qwen3-embedding:0.6b"
 
-read -rsp "$(echo -e "${BOLD}MySQL root password${NC} (leave blank if none): ")" MYSQL_ROOT_PASS
+read -rsp "$(echo -e "${BOLD}MySQL root password${NC} (leave blank if none): ")" MYSQL_ROOT_PASS </dev/tty
 echo ""
-read -rp "$(echo -e "${BOLD}Database name${NC} [laraclaw]: ")" DB_NAME
+read -rp "$(echo -e "${BOLD}Database name${NC} [laraclaw]: ")" DB_NAME </dev/tty
 DB_NAME="${DB_NAME:-laraclaw}"
-read -rp "$(echo -e "${BOLD}Database user${NC} [laraclaw]: ")" DB_USER
+read -rp "$(echo -e "${BOLD}Database user${NC} [laraclaw]: ")" DB_USER </dev/tty
 DB_USER="${DB_USER:-laraclaw}"
-read -rsp "$(echo -e "${BOLD}Database password${NC} [laraclaw_secret]: ")" DB_PASS
+read -rsp "$(echo -e "${BOLD}Database password${NC} [laraclaw_secret]: ")" DB_PASS </dev/tty
 echo ""
 DB_PASS="${DB_PASS:-laraclaw_secret}"
 
-read -rp "$(echo -e "${BOLD}Tavily API key${NC} (optional, for web search — press enter to skip): ")" TAVILY_KEY
+read -rp "$(echo -e "${BOLD}Tavily API key${NC} (optional, for web search — press enter to skip): ")" TAVILY_KEY </dev/tty
 
 echo ""
 ok "Configuration saved. Starting installation…"
