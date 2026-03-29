@@ -357,6 +357,7 @@ def _find_chrome_exe():
     import shutil
     # Check absolute paths first (reliable when $PATH is restricted)
     absolute_candidates = [
+        # Linux
         '/opt/google/chrome/google-chrome',
         '/usr/bin/google-chrome',
         '/usr/bin/google-chrome-stable',
@@ -364,6 +365,13 @@ def _find_chrome_exe():
         '/usr/bin/chromium-browser',
         '/usr/bin/chromium',
         '/snap/bin/chromium',
+        # macOS
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        # Windows (Git Bash / WSL paths)
+        'C:/Program Files/Google/Chrome/Application/chrome.exe',
+        'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+        '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
     ]
     for path in absolute_candidates:
         if os.path.isfile(path) and os.access(path, os.X_OK):
