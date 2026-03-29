@@ -5,21 +5,31 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-# ── colours ───────────────────────────────────────────────────────────────────
+# -- colours -----------------------------------------------------------------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-ok()   { echo -e "${GREEN}✔${NC}  $*"; }
-info() { echo -e "${BLUE}→${NC}  $*"; }
-warn() { echo -e "${YELLOW}⚠${NC}  $*"; }
-err()  { echo -e "${RED}✖${NC}  $*" >&2; }
-step() { echo -e "\n${BOLD}${CYAN}━━  $*${NC}"; }
+ok()   { echo -e "${GREEN}[ok]${NC}  $*"; }
+info() { echo -e "${BLUE}[..]${NC}  $*"; }
+warn() { echo -e "${YELLOW}[!!]${NC}  $*"; }
+err()  { echo -e "${RED}[xx]${NC}  $*" >&2; }
+step() { echo -e "\n${BOLD}${CYAN}==  $*${NC}"; }
+prompt() {
+    local label="$1"
+    local default="${2:-}"
+
+    if [[ -n "$default" ]]; then
+        printf "%b%s%b [%s]: " "${BOLD}" "$label" "${NC}" "$default"
+    else
+        printf "%b%s%b: " "${BOLD}" "$label" "${NC}"
+    fi
+}
 
 REPO="https://github.com/mmaikol-dev/laraclaw.git"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Projects/laraclaw}"
 APP_PORT=8100
 
-# ── banner ────────────────────────────────────────────────────────────────────
+# -- banner ------------------------------------------------------------------
 echo -e "
 ${CYAN}${BOLD}
  _                  ____ _
@@ -28,29 +38,31 @@ ${CYAN}${BOLD}
 | |__| (_| | | | (_| | |___| | (_| |\\ V  V /
 |_____\\__,_|_|  \\__,_|\\____|_|\\__,_| \\_/\\_/
 ${NC}
-  Local AI Agent — installer
+  Local AI Agent installer
   ${BLUE}${REPO}${NC}
 "
 
-# ── OS check ──────────────────────────────────────────────────────────────────
+# -- OS check ----------------------------------------------------------------
 if ! command -v apt-get &>/dev/null; then
     err "This installer requires a Debian/Ubuntu system (apt-get not found)."
     exit 1
 fi
 
-# ── interactive config ────────────────────────────────────────────────────────
+# -- interactive config -------------------------------------------------------
 step "Configuration"
 
-read -rp "$(echo -e "${BOLD}Install directory${NC} [${INSTALL_DIR}]: ")" input </dev/tty
+prompt "Install directory" "${INSTALL_DIR}"
+read -r input </dev/tty
 INSTALL_DIR="${input:-$INSTALL_DIR}"
 
-read -rp "$(echo -e "${BOLD}App port${NC} [${APP_PORT}]: ")" input </dev/tty
+prompt "App port" "${APP_PORT}"
+read -r input </dev/tty
 APP_PORT="${input:-$APP_PORT}"
 
 echo ""
-info "Ollama agent model — pick one or enter your own:"
+info "Ollama agent model - pick one or enter your own:"
 echo ""
-echo -e "  ${BOLD}── Local models (downloaded to your machine) ──${NC}"
+echo -e "  ${BOLD}-- Local models (downloaded to your machine) --${NC}"
 echo "   1) llama3.2:3b        (fast, ~2 GB, good tool use)"
 echo "   2) llama3.3:70b       (powerful, ~43 GB)"
 echo "   3) qwen2.5:7b         (balanced, ~5 GB)"
@@ -63,7 +75,7 @@ echo "   9) gemma3:9b          (Google Gemma 3, ~6 GB)"
 echo "  10) phi4:14b           (Microsoft Phi-4, ~9 GB)"
 echo "  11) glm4:9b            (GLM-4 local, ~6 GB)"
 echo ""
-echo -e "  ${BOLD}── Cloud models (API — no download required) ──${NC}"
+echo -e "  ${BOLD}-- Cloud models (API - no download required) --${NC}"
 echo "  12) glm-4:cloud        (ChatGLM-4 via cloud)"
 echo "  13) glm-4-flash:cloud  (ChatGLM-4 Flash, faster)"
 echo "  14) glm-5:cloud        (ChatGLM-5 via cloud)"
@@ -74,7 +86,8 @@ echo "  18) gemini-2.0-flash:cloud   (Google Gemini 2.0 Flash)"
 echo "  19) gemini-2.5-pro:cloud     (Google Gemini 2.5 Pro)"
 echo "  20) Enter manually     (any model name from ollama.com/search)"
 echo ""
-read -rp "$(echo -e "${BOLD}Choice${NC} [1]: ")" model_choice </dev/tty
+prompt "Choice" "1"
+read -r model_choice </dev/tty
 case "${model_choice:-1}" in
     1)  AGENT_MODEL="llama3.2:3b" ;;
     2)  AGENT_MODEL="llama3.3:70b" ;;
@@ -100,17 +113,22 @@ case "${model_choice:-1}" in
 esac
 EMBEDDING_MODEL="qwen3-embedding:0.6b"
 
-read -rsp "$(echo -e "${BOLD}MySQL root password${NC} (leave blank if none): ")" MYSQL_ROOT_PASS </dev/tty
+prompt "MySQL root password (leave blank if none)"
+read -rs MYSQL_ROOT_PASS </dev/tty
 echo ""
-read -rp "$(echo -e "${BOLD}Database name${NC} [laraclaw]: ")" DB_NAME </dev/tty
+prompt "Database name" "laraclaw"
+read -r DB_NAME </dev/tty
 DB_NAME="${DB_NAME:-laraclaw}"
-read -rp "$(echo -e "${BOLD}Database user${NC} [laraclaw]: ")" DB_USER </dev/tty
+prompt "Database user" "laraclaw"
+read -r DB_USER </dev/tty
 DB_USER="${DB_USER:-laraclaw}"
-read -rsp "$(echo -e "${BOLD}Database password${NC} [laraclaw_secret]: ")" DB_PASS </dev/tty
+prompt "Database password" "laraclaw_secret"
+read -rs DB_PASS </dev/tty
 echo ""
 DB_PASS="${DB_PASS:-laraclaw_secret}"
 
-read -rp "$(echo -e "${BOLD}Tavily API key${NC} (optional, for web search — press enter to skip): ")" TAVILY_KEY </dev/tty
+prompt "Tavily API key (optional, for web search - press enter to skip)"
+read -r TAVILY_KEY </dev/tty
 
 echo ""
 ok "Configuration saved. Starting installation…"
