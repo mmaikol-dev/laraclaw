@@ -125,7 +125,7 @@ DB_USER="${DB_USER:-laraclaw}"
 prompt "Database password" "laraclaw_secret"
 read -rs DB_PASS </dev/tty
 echo ""
-DB_PASS="${DB_PASS:-laraclaw_secret}"
+DB_PASS="${DB_PASS:-LaraClaw@2024!}"
 
 prompt "Tavily API key (optional, for web search - press enter to skip)"
 read -r TAVILY_KEY </dev/tty
@@ -200,8 +200,11 @@ if [[ -n "$MYSQL_ROOT_PASS" ]]; then
 fi
 
 $MYSQL_CMD <<SQL
+SET GLOBAL validate_password.policy = LOW;
+SET GLOBAL validate_password.length = 4;
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';
+ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
