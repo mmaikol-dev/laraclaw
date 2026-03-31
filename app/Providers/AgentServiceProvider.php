@@ -11,8 +11,12 @@ use App\Services\Embedding\VectorStore;
 use App\Services\Tools\BrowserTool;
 use App\Services\Tools\DocumentTool;
 use App\Services\Tools\FileTool;
+use App\Services\Tools\MemoryTool;
+use App\Services\Tools\ProjectTool;
+use App\Services\Tools\ScheduledTaskTool;
 use App\Services\Tools\ShellTool;
 use App\Services\Tools\SkillTool;
+use App\Services\Tools\TriggerTool;
 use App\Services\Tools\WebTool;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Support\ServiceProvider;
@@ -45,6 +49,10 @@ class AgentServiceProvider extends ServiceProvider
             $registry->register(new BrowserTool);
             $registry->register(new DocumentTool($app->make(EmbeddingService::class)));
             $registry->register(new SkillTool);
+            $registry->register(new MemoryTool);
+            $registry->register(new ScheduledTaskTool);
+            $registry->register(new ProjectTool);
+            $registry->register(new TriggerTool);
 
             return $registry;
         });

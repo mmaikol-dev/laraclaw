@@ -60,6 +60,20 @@ case "$OS" in
     *)       INSTALL_DIR="${INSTALL_DIR:-$HOME/Projects/laraclaw}" ;;
 esac
 
+# ── auto-detect system timezone ───────────────────────────────────────────────
+detect_timezone() {
+    if [[ -f /etc/timezone ]]; then
+        cat /etc/timezone
+    elif command_exists timedatectl; then
+        timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC"
+    elif [[ -f /etc/localtime ]]; then
+        readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||' || echo "UTC"
+    else
+        echo "UTC"
+    fi
+}
+DETECTED_TZ="$(detect_timezone)"
+
 # ── banner ────────────────────────────────────────────────────────────────────
 echo -e "
 ${CYAN}${BOLD}
@@ -84,6 +98,10 @@ INSTALL_DIR="${input:-$INSTALL_DIR}"
 prompt "App port" "${APP_PORT}"
 read -r input </dev/tty
 APP_PORT="${input:-$APP_PORT}"
+
+prompt "Timezone" "${DETECTED_TZ}"
+read -r input </dev/tty
+APP_TIMEZONE="${input:-$DETECTED_TZ}"
 
 echo ""
 info "Ollama agent model — pick one or enter your own:"
@@ -213,7 +231,8 @@ if ! php_ok; then
             install_pkg_linux \
                 php8.3-cli php8.3-fpm php8.3-mysql php8.3-curl php8.3-mbstring \
                 php8.3-xml php8.3-zip php8.3-gd php8.3-bcmath php8.3-intl \
-                php8.3-tokenizer php8.3-fileinfo php8.3-pdo
+                php8.3-tokenizer php8.3-fileinfo php8.3-pdo php8.3-pcntl \
+                php8.3-posix php8.3-sockets
             ;;
         macos)
             install_pkg_macos php@8.3
@@ -438,6 +457,7 @@ php artisan key:generate --no-interaction --quiet
 
 set_env APP_URL                "http://localhost:${APP_PORT}"
 set_env APP_PORT               "${APP_PORT}"
+set_env APP_TIMEZONE           "${APP_TIMEZONE}"
 set_env DB_CONNECTION          "mysql"
 set_env DB_HOST                "127.0.0.1"
 set_env DB_PORT                "3306"
@@ -462,13 +482,13 @@ npm run build --silent
 
 ok "LaraClaw installed at ${INSTALL_DIR}"
 
-# ── 9. Autostart ──────────────────────────────────────────────────────────────
-step "9/9  Autostart"
+# ── 9. Autostart + Scheduler ──────────────────────────────────────────────────
+step "9/9  Autostart + Scheduler"
 
 PHP_BIN="$(command -v php)"
 
 case "$OS" in
-    # ── Linux ─────────────────────────────────────────────────────────────────
+    # ── Linux / WSL ───────────────────────────────────────────────────────────
     linux|wsl)
         mkdir -p ~/.config/systemd/user
 
@@ -509,6 +529,15 @@ EOF
         systemctl --user start laraclaw-server laraclaw-queue
         loginctl enable-linger "$(whoami)" 2>/dev/null || true
 
+        # Scheduler crontab — runs every minute for scheduled tasks, triggers, reports
+        CRON_LINE="* * * * * cd ${INSTALL_DIR} && ${PHP_BIN} artisan schedule:run >> /tmp/laraclaw-scheduler.log 2>&1"
+        if ! crontab -l 2>/dev/null | grep -qF "artisan schedule:run"; then
+            (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+            ok "Scheduler crontab installed"
+        else
+            ok "Scheduler crontab already present"
+        fi
+
         # Desktop autostart — prefer PWA if installed
         mkdir -p ~/.config/autostart
         PWA_DESKTOP=$(grep -rl "localhost:${APP_PORT}\|laraclaw\|LaraClaw" ~/.local/share/applications/*.desktop 2>/dev/null | head -1 || true)
@@ -529,7 +558,7 @@ Icon=google-chrome
 Hidden=false
 X-GNOME-Autostart-enabled=true
 EOF
-        ok "Systemd services + desktop autostart enabled"
+        ok "Systemd services + desktop autostart + scheduler enabled"
         ;;
 
     # ── macOS ─────────────────────────────────────────────────────────────────
@@ -582,8 +611,31 @@ EOF
 </plist>
 EOF
 
-        launchctl load "$PLIST_DIR/io.laraclaw.server.plist" 2>/dev/null || true
-        launchctl load "$PLIST_DIR/io.laraclaw.queue.plist" 2>/dev/null || true
+        # Scheduler — macOS launchd plist running every minute
+        cat > "$PLIST_DIR/io.laraclaw.scheduler.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>          <string>io.laraclaw.scheduler</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${PHP_BIN}</string>
+        <string>artisan</string>
+        <string>schedule:run</string>
+    </array>
+    <key>WorkingDirectory</key> <string>${INSTALL_DIR}</string>
+    <key>StartInterval</key>    <integer>60</integer>
+    <key>RunAtLoad</key>        <true/>
+    <key>StandardOutPath</key>  <string>/tmp/laraclaw-scheduler.log</string>
+    <key>StandardErrorPath</key><string>/tmp/laraclaw-scheduler.log</string>
+</dict>
+</plist>
+EOF
+
+        launchctl load "$PLIST_DIR/io.laraclaw.server.plist"    2>/dev/null || true
+        launchctl load "$PLIST_DIR/io.laraclaw.queue.plist"     2>/dev/null || true
+        launchctl load "$PLIST_DIR/io.laraclaw.scheduler.plist" 2>/dev/null || true
 
         # Open at login via AppleScript
         osascript <<APPLESCRIPT 2>/dev/null || true
@@ -593,7 +645,7 @@ tell application "System Events"
 end tell
 APPLESCRIPT
 
-        ok "launchd services enabled (start on login)"
+        ok "launchd services + scheduler enabled (start on login)"
         ;;
 
     # ── Windows ───────────────────────────────────────────────────────────────
@@ -608,6 +660,15 @@ start "" /B "${PHP_BIN}" "${INSTALL_DIR}/artisan" queue:listen --tries=1 --timeo
 timeout /t 4 /nobreak >nul
 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --app=http://localhost:${APP_PORT}
 EOF
+
+        # Scheduler via Windows Task Scheduler — runs every minute
+        TASK_CMD="\"${PHP_BIN}\" \"${INSTALL_DIR}/artisan\" schedule:run"
+        schtasks /Create /F /SC MINUTE /MO 1 \
+            /TN "LaraClaw Scheduler" \
+            /TR "$TASK_CMD" \
+            /ST 00:00 2>/dev/null && ok "Windows Task Scheduler entry created" \
+            || warn "Could not create Task Scheduler entry — run manually as admin or add it via Task Scheduler GUI"
+
         ok "Startup batch script created in Windows Startup folder"
         ;;
 esac
@@ -618,10 +679,11 @@ ${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━�
   LaraClaw is ready!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 
-  ${BOLD}URL:${NC}      http://localhost:${APP_PORT}
-  ${BOLD}Model:${NC}    ${AGENT_MODEL}
-  ${BOLD}OS:${NC}       ${OS}
-  ${BOLD}Install:${NC}  ${INSTALL_DIR}
+  ${BOLD}URL:${NC}       http://localhost:${APP_PORT}
+  ${BOLD}Model:${NC}     ${AGENT_MODEL}
+  ${BOLD}Timezone:${NC}  ${APP_TIMEZONE}
+  ${BOLD}OS:${NC}        ${OS}
+  ${BOLD}Install:${NC}   ${INSTALL_DIR}
 
   ${CYAN}Open it now:${NC}
   google-chrome --app=http://localhost:${APP_PORT} &
@@ -630,6 +692,11 @@ ${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━�
   1. Open http://localhost:${APP_PORT} in Chrome
   2. Click the install icon (⊕) in the address bar
   3. LaraClaw will launch as a standalone app on every boot
+
+  ${CYAN}Agentic Employee:${NC}
+  Visit http://localhost:${APP_PORT}/employee to manage
+  scheduled tasks, projects, triggers, memories and reports.
+  The scheduler runs every minute automatically.
 "
 
 case "$OS" in
@@ -640,6 +707,7 @@ case "$OS" in
 
   ${CYAN}Logs:${NC}
   journalctl --user -u laraclaw-server -f
+  tail -f /tmp/laraclaw-scheduler.log
 "
         ;;
     macos)
@@ -649,6 +717,7 @@ case "$OS" in
 
   ${CYAN}Logs:${NC}
   tail -f /tmp/laraclaw-server.log
+  tail -f /tmp/laraclaw-scheduler.log
 "
         ;;
     windows)

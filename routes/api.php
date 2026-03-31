@@ -1,13 +1,18 @@
 <?php
 
 use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\MetricsController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SkillController;
 use App\Http\Controllers\Api\SkillScriptController;
 use App\Http\Controllers\Api\TaskController;
+use App\Http\Controllers\Api\WebhookController;
 use Illuminate\Support\Facades\Route;
+
+// Public webhook endpoint (no auth, validated by secret)
+Route::post('webhooks/{triggerName}', [WebhookController::class, 'receive'])->name('api.webhooks.receive');
 
 Route::prefix('v1')->group(function () {
     Route::get('conversations', [ConversationController::class, 'index'])->name('api.conversations.index');
@@ -36,6 +41,8 @@ Route::prefix('v1')->group(function () {
     Route::post('skills/{skill}/scripts', [SkillScriptController::class, 'store'])->name('api.skills.scripts.store');
     Route::put('skills/{skill}/scripts/{script}', [SkillScriptController::class, 'update'])->name('api.skills.scripts.update');
     Route::delete('skills/{skill}/scripts/{script}', [SkillScriptController::class, 'destroy'])->name('api.skills.scripts.destroy');
+    Route::post('employee/enhance', [EmployeeController::class, 'enhance'])->name('api.employee.enhance');
+    Route::post('employee/create', [EmployeeController::class, 'create'])->name('api.employee.create');
     Route::get('metrics', [MetricsController::class, 'index'])->name('api.metrics.index');
     Route::get('settings', [SettingsController::class, 'index'])->name('api.settings.index');
     Route::post('settings', [SettingsController::class, 'update'])->name('api.settings.update');

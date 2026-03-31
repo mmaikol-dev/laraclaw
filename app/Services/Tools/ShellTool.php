@@ -49,10 +49,12 @@ class ShellTool extends BaseTool
         $this->guardCommand($command);
 
         $timeout = min(60, max(1, (int) ($arguments['timeout'] ?? AgentSetting::get('shell_timeout', 30))));
-        $workingDirectory = (string) ($arguments['working_dir'] ?? AgentSetting::get('working_dir', '/tmp/laraclaw'));
+        $workingDirectory = (string) ($arguments['working_dir'] ?? AgentSetting::get('working_dir', '/tmp'));
 
         if (! is_dir($workingDirectory)) {
-            throw new RuntimeException('The working directory does not exist.');
+            if (! @mkdir($workingDirectory, 0755, true) || ! is_dir($workingDirectory)) {
+                $workingDirectory = '/tmp';
+            }
         }
 
         $wrappedCommand = 'timeout '.$timeout.' bash -c '.escapeshellarg($command);
@@ -62,7 +64,16 @@ class ShellTool extends BaseTool
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($wrappedCommand, $descriptors, $pipes, $workingDirectory);
+        $display = getenv('DISPLAY') ?: ':0';
+        $home = getenv('HOME') ?: ('/home/'.get_current_user());
+        $env = array_merge(getenv() ?: [], [
+            'DISPLAY' => $display,
+            'XAUTHORITY' => getenv('XAUTHORITY') ?: ($home.'/.Xauthority'),
+            'DBUS_SESSION_BUS_ADDRESS' => getenv('DBUS_SESSION_BUS_ADDRESS') ?: ('unix:path=/run/user/'.posix_getuid().'/bus'),
+            'HOME' => $home,
+        ]);
+
+        $process = proc_open($wrappedCommand, $descriptors, $pipes, $workingDirectory, $env);
 
         if (! is_resource($process)) {
             throw new RuntimeException('Unable to start the shell process.');
@@ -121,7 +132,6 @@ class ShellTool extends BaseTool
             'systemctl enable',
             'systemctl disable',
             'crontab',
-            'nohup',
             '| bash',
             '| sh',
             'bash <(',

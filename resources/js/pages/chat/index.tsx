@@ -1,10 +1,12 @@
 import { Head } from '@inertiajs/react';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { EmployeeFormModal } from '@/components/employee-form-modal';
 import { VoiceInput } from '@/components/voice-input';
 import {
     Archive,
     Bot,
     Brain,
+    BotMessageSquare,
     CheckCircle2,
     ChevronDown,
     LoaderCircle,
@@ -136,6 +138,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
     const [isSending, setIsSending] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showEmployeeForm, setShowEmployeeForm] = useState(false);
     const bottomRef = useRef<HTMLDivElement | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -443,6 +446,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={conversation?.title ?? 'Chat'} />
+            <EmployeeFormModal open={showEmployeeForm} onClose={() => setShowEmployeeForm(false)} />
 
             <div className="flex min-h-0 flex-1 overflow-hidden">
                 {/* ── Conversations sidebar ── */}
@@ -554,6 +558,15 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                     <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
                                         <p className="text-[11px] text-muted-foreground/60">⏎ send · ⇧⏎ newline</p>
                                         <div className="flex items-center gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowEmployeeForm(true)}
+                                            title="Set up an employee task"
+                                            className="flex h-8 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                                        >
+                                            <BotMessageSquare className="size-3.5" />
+                                            Employee
+                                        </button>
                                         <VoiceInput
                                             onTranscript={handleVoiceTranscript}
                                             disabled={isSending || isStreaming}
