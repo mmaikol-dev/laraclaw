@@ -75,6 +75,9 @@ detect_timezone() {
 DETECTED_TZ="$(detect_timezone)"
 
 # ── banner ────────────────────────────────────────────────────────────────────
+DISTRO_LABEL=""
+[[ -n "$DISTRO" ]] && DISTRO_LABEL=" ($DISTRO)"
+
 echo -e "
 ${CYAN}${BOLD}
  _                  ____ _
@@ -85,7 +88,7 @@ ${CYAN}${BOLD}
 ${NC}
   Local AI Agent installer
   ${BLUE}${REPO}${NC}
-  ${YELLOW}Detected OS: ${OS}${[[ -n "$DISTRO" ]] && echo " ($DISTRO)" || echo ""}${NC}
+  ${YELLOW}Detected OS: ${OS}${DISTRO_LABEL}${NC}
 "
 
 # ── interactive config ────────────────────────────────────────────────────────
@@ -637,14 +640,6 @@ EOF
         launchctl load "$PLIST_DIR/io.laraclaw.queue.plist"     2>/dev/null || true
         launchctl load "$PLIST_DIR/io.laraclaw.scheduler.plist" 2>/dev/null || true
 
-        # Open at login via AppleScript
-        osascript <<APPLESCRIPT 2>/dev/null || true
-tell application "System Events"
-    make new login item at end of login items with properties ¬
-        {path:"/Applications/Google Chrome.app", hidden:false}
-end tell
-APPLESCRIPT
-
         ok "launchd services + scheduler enabled (start on login)"
         ;;
 
@@ -661,7 +656,6 @@ timeout /t 4 /nobreak >nul
 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --app=http://localhost:${APP_PORT}
 EOF
 
-        # Scheduler via Windows Task Scheduler — runs every minute
         TASK_CMD="\"${PHP_BIN}\" \"${INSTALL_DIR}/artisan\" schedule:run"
         schtasks /Create /F /SC MINUTE /MO 1 \
             /TN "LaraClaw Scheduler" \
