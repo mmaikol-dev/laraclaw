@@ -629,8 +629,8 @@ case "$OS" in
         mkdir -p "${PREFIX}/etc/supervisor" "${SUPERVISOR_LOG}" "${SUPERVISOR_RUN}"
 
         cat > "${SUPERVISOR_CONF}" <<EOF
-[unix_http_server]
-file=${SUPERVISOR_RUN}/supervisor.sock
+[inet_http_server]
+port=127.0.0.1:9001
 
 [supervisord]
 logfile=${SUPERVISOR_LOG}/supervisord.log
@@ -644,7 +644,7 @@ nodaemon=false
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
 [supervisorctl]
-serverurl=unix://${SUPERVISOR_RUN}/supervisor.sock
+serverurl=http://127.0.0.1:9001
 
 [program:laraclaw-serve]
 command=${PHP_BIN} artisan serve --host=0.0.0.0 --port=${APP_PORT}
@@ -999,9 +999,9 @@ case "$OS" in
   3. LaraClaw appears as a standalone app icon
 
   ${CYAN}Process management:${NC}
-  supervisorctl -c ${PREFIX}/etc/supervisor/supervisord.conf status
-  supervisorctl -c ${PREFIX}/etc/supervisor/supervisord.conf restart all
-  supervisorctl -c ${PREFIX}/etc/supervisor/supervisord.conf restart laraclaw-serve
+  supervisorctl -s http://127.0.0.1:9001 status
+  supervisorctl -s http://127.0.0.1:9001 restart all
+  supervisorctl -s http://127.0.0.1:9001 restart laraclaw-serve
 
   ${CYAN}Logs:${NC}
   tail -f ${PREFIX}/var/log/laraclaw-serve.out.log
