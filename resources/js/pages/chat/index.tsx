@@ -10,6 +10,7 @@ import {
     CheckCircle2,
     ChevronDown,
     LoaderCircle,
+    Menu,
     MessageSquarePlus,
     MessagesSquare,
     MoreHorizontal,
@@ -17,6 +18,7 @@ import {
     SendHorizontal,
     Square,
     Wrench,
+    X,
     XCircle,
     Zap,
 } from 'lucide-react';
@@ -139,6 +141,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
     const [isStreaming, setIsStreaming] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showEmployeeForm, setShowEmployeeForm] = useState(false);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
     const bottomRef = useRef<HTMLDivElement | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -441,6 +444,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
     function handleNewChat(): void {
         setActiveConversationId(null);
         window.history.replaceState({}, '', '/chat');
+        setSidebarOpen(false);
     }
 
     return (
@@ -449,22 +453,43 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
             <EmployeeFormModal open={showEmployeeForm} onClose={() => setShowEmployeeForm(false)} />
 
             <div className="flex min-h-0 flex-1 overflow-hidden">
+                {/* ── Mobile backdrop ── */}
+                {sidebarOpen && (
+                    <div
+                        className="fixed inset-0 z-30 bg-black/50 sm:hidden"
+                        onClick={() => setSidebarOpen(false)}
+                    />
+                )}
+
                 {/* ── Conversations sidebar ── */}
-                <aside className="flex w-64 shrink-0 flex-col border-r bg-sidebar">
+                <aside
+                    className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r bg-sidebar transition-transform duration-200 sm:static sm:z-auto sm:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+                >
                     <div className="flex items-center justify-between border-b px-3 py-2.5">
                         <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                             <MessagesSquare className="size-3.5 text-teal-500" />
                             Conversations
                         </span>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-6 text-muted-foreground hover:text-foreground"
-                            onClick={handleNewChat}
-                            title="New conversation"
-                        >
-                            <PenSquare className="size-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-0.5">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-6 text-muted-foreground hover:text-foreground"
+                                onClick={handleNewChat}
+                                title="New conversation"
+                            >
+                                <PenSquare className="size-3.5" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-6 text-muted-foreground hover:text-foreground sm:hidden"
+                                onClick={() => setSidebarOpen(false)}
+                                title="Close"
+                            >
+                                <X className="size-3.5" />
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto py-1">
@@ -489,6 +514,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                         onSelect={() => {
                                             setActiveConversationId(conv.id);
                                             window.history.replaceState({}, '', `/chat/${conv.id}`);
+                                            setSidebarOpen(false);
                                         }}
                                         onArchive={() => void archiveConversation(conv.id)}
                                     />
@@ -500,10 +526,34 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
 
                 {/* ── Chat panel ── */}
                 <div className="relative flex min-w-0 flex-1 flex-col">
+                    {/* Mobile-only top bar */}
+                    <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 sm:hidden">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 shrink-0 text-muted-foreground"
+                            onClick={() => setSidebarOpen(true)}
+                            title="Conversations"
+                        >
+                            <Menu className="size-4" />
+                        </Button>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
+                            {conversation?.title ?? 'LaraClaw'}
+                        </span>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 shrink-0 text-muted-foreground"
+                            onClick={handleNewChat}
+                            title="New conversation"
+                        >
+                            <PenSquare className="size-4" />
+                        </Button>
+                    </div>
                     {/* Scrollable messages */}
                     <div className="flex-1 overflow-y-auto">
-                        <div className="mx-auto max-w-3xl space-y-6 px-4 pb-2 pt-6">
-                            {isLoading ? (
+                        <div className="mx-auto max-w-3xl space-y-4 px-3 pb-2 pt-4 sm:space-y-6 sm:px-4 sm:pt-6">
+                            {isLoading && !isStreaming ? (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <LoaderCircle className="size-4 animate-spin" />
                                     Loading conversation…
@@ -542,7 +592,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                     </div>
 
                     {/* Floating input — pinned to bottom, never scrolls */}
-                    <div className="shrink-0 px-4 pb-4 pt-2">
+                    <div className="shrink-0 px-2 pb-3 pt-2 sm:px-4 sm:pb-4">
                         <div className="mx-auto max-w-3xl">
                             <form onSubmit={handleSubmit}>
                                 <div className="rounded-2xl border bg-card shadow-lg ring-1 ring-border/50 focus-within:ring-2 focus-within:ring-teal-500/40 dark:shadow-black/30">
@@ -552,12 +602,12 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                         onKeyDown={handleKeyDown}
                                         rows={3}
                                         placeholder="Message LaraClaw…"
-                                        className="w-full resize-none rounded-t-2xl border-0 bg-transparent px-4 pt-3.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                                        className="w-full resize-none rounded-t-2xl border-0 bg-transparent px-3 pt-3 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 sm:px-4 sm:pt-3.5"
                                         disabled={isSending}
                                     />
-                                    <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
-                                        <p className="text-[11px] text-muted-foreground/60">⏎ send · ⇧⏎ newline</p>
-                                        <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center justify-between px-2 pb-2 pt-1 sm:px-3 sm:pb-2.5">
+                                        <p className="hidden text-[11px] text-muted-foreground/60 sm:block">⏎ send · ⇧⏎ newline</p>
+                                        <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
                                         <button
                                             type="button"
                                             onClick={() => setShowEmployeeForm(true)}
@@ -565,7 +615,7 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                                             className="flex h-8 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                                         >
                                             <BotMessageSquare className="size-3.5" />
-                                            Employee
+                                            <span className="hidden sm:inline">Employee</span>
                                         </button>
                                         <VoiceInput
                                             onTranscript={handleVoiceTranscript}
@@ -624,7 +674,7 @@ function HistoryMessage({ message }: { message: ChatMessage }) {
                 </div>
             )}
 
-            <div className={`flex flex-col gap-2 ${isUser ? 'items-end max-w-[78%]' : 'items-start max-w-[85%]'}`}>
+            <div className={`flex flex-col gap-2 ${isUser ? 'max-w-[88%] items-end sm:max-w-[78%]' : 'max-w-[94%] items-start sm:max-w-[85%]'}`}>
                 {/* Thinking trace — above the bubble */}
                 {!isUser && (hasThinking || hasTaskLogs) && (
                     <ThinkingTrace thinking={message.thinking} taskLogs={message.task_logs} />

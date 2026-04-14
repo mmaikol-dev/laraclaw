@@ -1,4 +1,4 @@
-const CACHE_NAME = 'laraclaw-v1';
+const CACHE_NAME = 'laraclaw-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -33,6 +33,11 @@ self.addEventListener('fetch', (event) => {
     const requestUrl = new URL(event.request.url);
 
     if (requestUrl.origin !== self.location.origin) {
+        return;
+    }
+
+    // Never cache API requests — always fetch fresh from the network
+    if (requestUrl.pathname.startsWith('/api/')) {
         return;
     }
 
