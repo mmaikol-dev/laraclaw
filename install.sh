@@ -597,8 +597,10 @@ fi
 info "Running database migrations…"
 php artisan migrate --no-interaction --force --quiet
 
-info "Seeding database…"
-php artisan db:seed --no-interaction --force --quiet
+if [[ "$OS" != "android" ]]; then
+    info "Seeding database…"
+    php artisan db:seed --no-interaction --force --quiet
+fi
 
 if [[ "$OS" == "android" ]]; then
     info "Caching config for performance…"
