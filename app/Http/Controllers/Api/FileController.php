@@ -249,21 +249,23 @@ class FileController extends Controller
     private function allowedPaths(): array
     {
         $configuredPaths = array_filter(array_map(
-            'trim',
+            fn (string $path): string => $this->expandConfiguredPath(trim($path)),
             explode(',', (string) (AgentSetting::get('allowed_paths') ?: config('agent.allowed_paths', ''))),
         ));
 
         return array_values(array_unique([
             $this->normalizeAbsolutePath($this->workingDirectory()),
             $this->normalizeAbsolutePath('/tmp/laraclaw'),
-            $this->normalizeAbsolutePath((string) config('agent.home_dir', '/tmp/laraclaw')),
+            $this->normalizeAbsolutePath($this->expandConfiguredPath((string) config('agent.home_dir', '/tmp/laraclaw'))),
             ...array_map(fn (string $path): string => $this->normalizeAbsolutePath($path), $configuredPaths),
         ]));
     }
 
     private function workingDirectory(): string
     {
-        return $this->normalizeAbsolutePath((string) AgentSetting::get('working_dir', config('agent.working_dir', '/tmp/laraclaw')));
+        return $this->normalizeAbsolutePath(
+            $this->expandConfiguredPath((string) AgentSetting::get('working_dir', config('agent.working_dir', '/tmp/laraclaw'))),
+        );
     }
 
     private function normalizeAbsolutePath(string $path): string
@@ -277,6 +279,7 @@ class FileController extends Controller
 
             if ($segment === '..') {
                 array_pop($segments);
+
                 continue;
             }
 
@@ -284,5 +287,23 @@ class FileController extends Controller
         }
 
         return '/'.implode('/', $segments);
+    }
+
+    private function expandConfiguredPath(string $path): string
+    {
+        $trimmedPath = trim($path);
+
+        if ($trimmedPath === '') {
+            return $trimmedPath;
+        }
+
+        $homeDirectory = rtrim((string) config('agent.home_dir', env('HOME', '/tmp/laraclaw')), '/');
+        $expandedPath = str_replace(['${HOME}', '$HOME'], $homeDirectory, $trimmedPath);
+
+        if ($expandedPath === '~' || str_starts_with($expandedPath, '~/')) {
+            return $homeDirectory.substr($expandedPath, 1);
+        }
+
+        return $expandedPath;
     }
 }

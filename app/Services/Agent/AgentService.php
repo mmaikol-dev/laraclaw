@@ -109,6 +109,19 @@ class AgentService
                     'model' => $conversation->model ?: $this->ollama->agentModel,
                     'temperature' => $temperature,
                 ]) as $event) {
+                    if (($event['type'] ?? null) === 'thinking') {
+                        $chunk = (string) ($event['content'] ?? '');
+
+                        if ($chunk === '') {
+                            continue;
+                        }
+
+                        $thinkingContent .= $chunk;
+                        $this->notify($listener, ['type' => 'thinking_chunk', 'content' => $chunk]);
+
+                        continue;
+                    }
+
                     if (($event['type'] ?? null) === 'content') {
                         $chunk = (string) ($event['content'] ?? '');
 
@@ -170,6 +183,23 @@ class AgentService
 
                 $content = trim($content);
                 $totalTokensUsed += (int) $stats['prompt_tokens'] + (int) $stats['completion_tokens'];
+                $model = $conversation->model ?: $this->ollama->agentModel;
+
+                if (
+                    $content === ''
+                    && $toolCalls === []
+                    && ! $stopped
+                    && $this->shouldRecoverEmptyResponse($thinkingContent, $stats)
+                ) {
+                    $recoveredContent = $this->recoverEmptyResponse($history, $model, $temperature);
+
+                    if ($recoveredContent !== '') {
+                        $content = $recoveredContent;
+                        $this->runState->appendChunk($conversation->id, $content);
+                        event(new AgentChunkStreamed($channelName, $content));
+                        $this->notify($listener, ['type' => 'chunk', 'content' => $content]);
+                    }
+                }
 
                 if ($toolCalls === [] || $stopped) {
                     $assistantMessage = $conversation->messages()->create([
@@ -182,7 +212,7 @@ class AgentService
                         'duration_ms' => (int) $stats['total_duration_ms'],
                     ]);
 
-                    MetricSnapshot::record($stats, $conversation->model ?: $this->ollama->agentModel);
+                    MetricSnapshot::record($stats, $model);
                     $conversation->increment('total_tokens', (int) $stats['prompt_tokens'] + (int) $stats['completion_tokens']);
 
                     event(new AgentFinished($channelName, $assistantMessage->id, $stats));
@@ -245,6 +275,33 @@ class AgentService
         event(new AgentFinished($channelName, $assistantMessage->id, $emptyStats));
 
         return $assistantMessage;
+    }
+
+    /**
+     * @param  array<string, int|float>  $stats
+     */
+    private function shouldRecoverEmptyResponse(string $thinkingContent, array $stats): bool
+    {
+        return trim($thinkingContent) !== '' || (int) ($stats['completion_tokens'] ?? 0) > 0;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $history
+     */
+    private function recoverEmptyResponse(array $history, string $model, float $temperature): string
+    {
+        $recoveryResponse = $this->ollama->chat([
+            ...$history,
+            [
+                'role' => 'user',
+                'content' => 'Provide the final answer to the last request now. Do not call tools. Do not include hidden reasoning.',
+            ],
+        ], [], [
+            'model' => $model,
+            'temperature' => $temperature,
+        ]);
+
+        return trim((string) data_get($recoveryResponse, 'message.content', ''));
     }
 
     // -------------------------------------------------------------------------

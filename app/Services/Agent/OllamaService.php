@@ -10,6 +10,11 @@ class OllamaService
 {
     private string $host;
 
+    /**
+     * @var array<string, string>
+     */
+    private array $headers;
+
     private int $timeout;
 
     private int $contextLength;
@@ -17,6 +22,7 @@ class OllamaService
     public function __construct()
     {
         $this->host = rtrim((string) config('ollama.host'), '/');
+        $this->headers = $this->resolveHeaders();
         $this->agentModel = (string) config('ollama.agent_model');
         $this->embeddingModel = (string) config('ollama.embedding_model');
         $this->timeout = (int) config('ollama.timeout', 120);
@@ -50,7 +56,7 @@ class OllamaService
             $payload['tools'] = $tools;
         }
 
-        $response = Http::timeout($this->timeout)->post("{$this->host}/api/chat", $payload);
+        $response = $this->httpClient()->post("{$this->host}/api/chat", $payload);
 
         if ($response->failed()) {
             throw new RuntimeException('Ollama chat request failed: '.$response->body());
@@ -102,7 +108,7 @@ class OllamaService
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => false,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => $this->curlHeaders(),
             CURLOPT_POSTFIELDS => json_encode($payload, JSON_THROW_ON_ERROR),
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_WRITEFUNCTION => function ($curl, string $chunk) use (&$buffer, &$pendingEvents): int {
@@ -180,7 +186,7 @@ class OllamaService
             'input' => is_array($input) ? array_values($input) : [$input],
         ];
 
-        $response = Http::timeout($this->timeout)->post("{$this->host}/api/embed", $payload);
+        $response = $this->httpClient()->post("{$this->host}/api/embed", $payload);
 
         if ($response->failed()) {
             throw new RuntimeException('Ollama embed request failed: '.$response->body());
@@ -204,7 +210,7 @@ class OllamaService
     public function healthCheck(): array
     {
         try {
-            $response = Http::timeout(5)->get("{$this->host}/api/tags");
+            $response = Http::withHeaders($this->headers)->timeout(5)->get("{$this->host}/api/tags");
 
             if ($response->failed()) {
                 throw new RuntimeException($response->body());
@@ -256,6 +262,51 @@ class OllamaService
     }
 
     /**
+     * @return array<string, string>
+     */
+    private function resolveHeaders(): array
+    {
+        $configuredHeaders = config('ollama.headers', []);
+        $headers = is_array($configuredHeaders) ? $configuredHeaders : [];
+        $normalizedHeaders = [];
+
+        foreach ($headers as $key => $value) {
+            if (! is_string($key) || trim($key) === '' || ! is_scalar($value)) {
+                continue;
+            }
+
+            $normalizedHeaders[$key] = (string) $value;
+        }
+
+        $apiKey = trim((string) config('ollama.api_key', ''));
+
+        if ($apiKey !== '' && ! array_key_exists('Authorization', $normalizedHeaders)) {
+            $normalizedHeaders['Authorization'] = 'Bearer '.$apiKey;
+        }
+
+        return $normalizedHeaders;
+    }
+
+    private function httpClient()
+    {
+        return Http::withHeaders($this->headers)->timeout($this->timeout);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function curlHeaders(): array
+    {
+        $headers = ['Content-Type: application/json'];
+
+        foreach ($this->headers as $key => $value) {
+            $headers[] = "{$key}: {$value}";
+        }
+
+        return $headers;
+    }
+
+    /**
      * @param  array<string, mixed>  $response
      * @return array<string, int|float>
      */
@@ -283,7 +334,15 @@ class OllamaService
     {
         $response = $this->chat($messages, $tools, $options);
         $message = $response['message'] ?? [];
+        $thinking = (string) ($message['thinking'] ?? '');
         $content = (string) ($message['content'] ?? '');
+
+        foreach (preg_split('/(\s+)/', $thinking, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [] as $chunk) {
+            yield [
+                'type' => 'thinking',
+                'content' => $chunk,
+            ];
+        }
 
         foreach (preg_split('/(\s+)/', $content, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [] as $chunk) {
             yield [
@@ -322,7 +381,15 @@ class OllamaService
 
         $events = [];
         $message = is_array($payload['message'] ?? null) ? $payload['message'] : [];
+        $thinking = $message['thinking'] ?? null;
         $content = $message['content'] ?? null;
+
+        if (is_string($thinking) && $thinking !== '') {
+            $events[] = [
+                'type' => 'thinking',
+                'content' => $thinking,
+            ];
+        }
 
         if (is_string($content) && $content !== '') {
             $events[] = [

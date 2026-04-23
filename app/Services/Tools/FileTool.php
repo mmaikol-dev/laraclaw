@@ -298,16 +298,18 @@ class FileTool extends BaseTool
 
     private function refreshSettings(): void
     {
-        $this->workingDir = (string) AgentSetting::get('working_dir', config('agent.working_dir', '/tmp/laraclaw'));
+        $this->workingDir = $this->expandConfiguredPath(
+            (string) AgentSetting::get('working_dir', config('agent.working_dir', '/tmp/laraclaw')),
+        );
         $configuredPaths = array_filter(array_map(
-            'trim',
+            fn (string $path): string => $this->expandConfiguredPath(trim($path)),
             explode(',', (string) (AgentSetting::get('allowed_paths') ?: config('agent.allowed_paths', ''))),
         ));
 
         $this->allowedPaths = array_values(array_unique([
             $this->normalizeAbsolutePath($this->workingDir),
             $this->normalizeAbsolutePath('/tmp/laraclaw'),
-            $this->normalizeAbsolutePath((string) config('agent.home_dir', '/tmp/laraclaw')),
+            $this->normalizeAbsolutePath($this->expandConfiguredPath((string) config('agent.home_dir', '/tmp/laraclaw'))),
             ...array_map(fn (string $path): string => $this->normalizeAbsolutePath($path), $configuredPaths),
         ]));
         $this->maxFileSizeMb = (int) AgentSetting::get('max_file_size_mb', 10);
@@ -344,7 +346,9 @@ class FileTool extends BaseTool
 
     private function preferredBrowseRoot(): string
     {
-        $homeDirectory = $this->normalizeAbsolutePath((string) config('agent.home_dir', '/tmp/laraclaw'));
+        $homeDirectory = $this->normalizeAbsolutePath(
+            $this->expandConfiguredPath((string) config('agent.home_dir', '/tmp/laraclaw')),
+        );
 
         if (is_dir($homeDirectory)) {
             foreach ($this->allowedPaths as $allowedPath) {
@@ -401,6 +405,7 @@ class FileTool extends BaseTool
 
             if ($segment === '..') {
                 array_pop($segments);
+
                 continue;
             }
 
@@ -408,6 +413,24 @@ class FileTool extends BaseTool
         }
 
         return '/'.implode('/', $segments);
+    }
+
+    private function expandConfiguredPath(string $path): string
+    {
+        $trimmedPath = trim($path);
+
+        if ($trimmedPath === '') {
+            return $trimmedPath;
+        }
+
+        $homeDirectory = rtrim((string) config('agent.home_dir', env('HOME', '/tmp/laraclaw')), '/');
+        $expandedPath = str_replace(['${HOME}', '$HOME'], $homeDirectory, $trimmedPath);
+
+        if ($expandedPath === '~' || str_starts_with($expandedPath, '~/')) {
+            return $homeDirectory.substr($expandedPath, 1);
+        }
+
+        return $expandedPath;
     }
 
     private function formatEntry(string $path): string
