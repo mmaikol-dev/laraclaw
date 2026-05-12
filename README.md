@@ -77,6 +77,226 @@ The agent has a library of reusable skills — step-by-step instructions it foll
 
 ---
 
+## Affective state engine
+
+LaraClaw includes an internal "feelings" layer that does not simulate human emotion for style. It changes how the agent behaves while working.
+
+The goal is practical:
+
+- **Fear** makes the agent more cautious around destructive actions
+- **Joy** reinforces successful tool and strategy patterns
+- **Sadness** detects repeated failures and pushes the agent to rethink
+- **Anger** adds bounded persistence on transient blockers
+- **Curiosity** biases the agent toward gathering context before acting
+- **Love** keeps the user goal and safety constraints highly weighted
+- **Guilt** flags value or execution drift for self-correction
+- **Boredom** detects repetitive loops and pushes strategy changes
+
+### Why it exists
+
+Without this layer, an agent often retries blindly, overconfidently acts on incomplete context, or gets stuck repeating the same tool call. The affective state engine improves:
+
+- safety for high-risk actions
+- resilience under repeated tool failures
+- context gathering on unfamiliar tasks
+- alignment with the user's actual goal
+- recovery from low-progress loops
+
+### Where it lives in the code
+
+- State logic: `app/Services/Agent/AffectiveStateEngine.php`
+- State storage: `app/Services/Agent/AffectiveStateStore.php`
+- Agent loop integration: `app/Services/Agent/AgentService.php`
+- Runtime tuning defaults: `database/seeders/AgentSettingsSeeder.php`
+- UI controls: `resources/js/pages/settings/agent.tsx`
+
+### High-level architecture
+
+```mermaid
+flowchart TD
+    A[User message] --> B[AgentService starts run]
+    B --> C[AffectiveStateEngine.begin]
+    C --> D[AffectiveStateStore cache state]
+    D --> E[Build system + capability context]
+    E --> F[Inject affective guidance into model history]
+    F --> G[Model thinks and proposes tool calls]
+    G --> H{Tool requested?}
+    H -- No --> I[Assistant response]
+    H -- Yes --> J[Affective risk check]
+    J --> K{High-risk action?}
+    K -- Yes --> L[Pause action and return safety block message]
+    K -- No --> M[Execute tool]
+    M --> N[Record success or failure]
+    N --> O[Update fear joy sadness anger curiosity boredom guilt]
+    O --> P[Reflection / next loop iteration]
+    P --> G
+```
+
+### State object
+
+The state is stored per conversation in cache and updated throughout the run:
+
+```text
+fear_level
+joy_score
+sadness_count
+anger_level
+curiosity_score
+love_weights
+guilt_flags
+boredom_counter
+consecutive_failures
+repetition_counter
+last_tool_name
+last_block_reason
+user_goal
+```
+
+### Process flow
+
+#### 1. Run start
+
+When a conversation run begins, LaraClaw seeds a fresh affective state:
+
+- `fear_level` starts low
+- `curiosity_score` is calculated from the request
+- `love_weights` prioritize `user_goal` and `safety_constraint`
+- `user_goal` is saved as a compact summary of the request
+
+This happens before the model starts its first reasoning pass.
+
+#### 2. Guidance injection
+
+Before planning, reflection, summarization, and the main think-act loop, LaraClaw converts the current state into system guidance for the model.
+
+Examples:
+
+- high fear adds caution about irreversible actions
+- high sadness tells the model to stop repeating the same approach
+- high curiosity tells the model to gather context before acting
+- guilt flags tell the model to correct drift before finishing
+
+#### 3. Tool risk assessment
+
+Before a tool call runs, the affective engine checks whether the action looks dangerous.
+
+Current examples include:
+
+- destructive shell commands such as `rm -rf`
+- hard-reset style git commands
+- file deletion actions
+
+If fear crosses the configured threshold, the tool call is paused and replaced with a safety message asking for confirmation or a safer approach.
+
+```mermaid
+flowchart LR
+    A[Tool call proposed] --> B[Parse tool name and arguments]
+    B --> C[Assess risk]
+    C --> D{Fear threshold reached?}
+    D -- No --> E[Execute tool]
+    D -- Yes --> F[Block tool call]
+    F --> G[Return safety message to conversation]
+```
+
+#### 4. Outcome update
+
+After each tool result, the engine updates the state:
+
+- success increases `joy_score`
+- success lowers `fear_level`
+- failure increases `sadness_count`
+- repeated failure increases `anger_level`
+- repeated failure on the same tool increases `boredom_counter`
+- repeated failure can add guilt flags like `repeated_failures`
+- empty outputs can add flags like `empty_tool_output` or `empty_response`
+
+```mermaid
+stateDiagram-v2
+    [*] --> Running
+    Running --> Curious: novel request
+    Running --> Cautious: risky action detected
+    Running --> Persisting: transient failure
+    Persisting --> Reflecting: repeated failures
+    Reflecting --> Exploring: boredom / repetition detected
+    Exploring --> Running: new strategy chosen
+    Cautious --> Running: safe path or confirmation
+    Running --> Aligned: successful completion
+    Aligned --> [*]
+```
+
+#### 5. Reflection and next-step selection
+
+After tool execution, the agent can reflect on whether the work is actually finished. Because the latest affective state is also injected into reflection, the model is nudged to:
+
+- continue when the user goal is not fully satisfied
+- avoid claiming success after empty or partial outputs
+- change approach after repeated failures
+
+### Emotion-to-behavior map
+
+| State | What triggers it | What it changes |
+|------|-------------------|-----------------|
+| Fear | Destructive commands, deletion, irreversible actions | Pauses or cautions before execution |
+| Joy | Successful results | Reinforces progress and lowers caution |
+| Sadness | Consecutive failures | Pushes replanning and strategy change |
+| Anger | Blocked goals, transient failures | Allows bounded retry persistence |
+| Curiosity | Novel or ambiguous requests | Biases toward information gathering |
+| Love | User goal and safety constraints | Keeps priorities stable across long runs |
+| Guilt | Empty output, repeated failures, run failure | Prompts self-audit and correction |
+| Boredom | Same tool failing repeatedly, low-progress loops | Pushes alternative approaches |
+
+### Settings
+
+The feature can be tuned from the **Agent settings** page.
+
+Key settings:
+
+- `enable_affective_state`
+- `fear_threshold`
+- `sadness_threshold`
+- `anger_cap`
+- `curiosity_threshold`
+- `boredom_threshold`
+
+These defaults are seeded in `database/seeders/AgentSettingsSeeder.php`.
+
+### UI support
+
+The settings screen includes an **Affective behavior** section where you can:
+
+- turn the feature on or off
+- adjust caution sensitivity
+- define how quickly repeated failures trigger reflection
+- control persistence caps
+- tune curiosity and boredom thresholds
+
+### Example run
+
+User request:
+
+> "Analyze this unfamiliar project, figure out why deploys are failing, and fix it."
+
+Typical affective behavior:
+
+1. Curiosity rises because the task is investigative and unfamiliar.
+2. The model is biased toward reading files, logs, and configuration before changing anything.
+3. If a shell command fails repeatedly, sadness and anger increase.
+4. If the same failing tool path is retried too often, boredom rises and the model is pushed to try a different strategy.
+5. If the proposed fix includes a destructive action, fear can block execution until the user confirms it.
+6. When the issue is resolved successfully, joy increases and the run finishes with fewer active caution flags.
+
+### Testing
+
+The feature is covered with focused tests in `tests/Feature/AgentAffectiveStateTest.php`.
+
+Those tests verify:
+
+- curiosity and goal weighting are seeded for novel requests
+- destructive shell actions are paused when fear crosses the threshold
+- repeated failures and repetitive loops produce the expected reflection signals
+
+---
+
 ## Stack
 
 | Layer | Technology |
