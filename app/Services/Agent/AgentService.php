@@ -5,6 +5,7 @@ namespace App\Services\Agent;
 use App\Events\AgentChunkStreamed;
 use App\Events\AgentFinished;
 use App\Events\AgentToolCalled;
+use App\Models\AgentMemory;
 use App\Models\AgentSetting;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -20,6 +21,7 @@ class AgentService
         protected OllamaService $ollama,
         protected ToolRegistry $tools,
         protected AgentRunState $runState,
+        protected AffectiveStateEngine $affectiveState,
     ) {}
 
     /**
@@ -28,6 +30,7 @@ class AgentService
     public function run(Conversation $conversation, string $userMessage, string $channelName, ?callable $listener = null): Message
     {
         $this->runState->begin($conversation->id);
+        $this->affectiveState->begin($conversation->id, $userMessage);
         $this->notify($listener, [
             'type' => 'status',
             'status' => 'queued',
@@ -50,8 +53,10 @@ class AgentService
             "You are LaraClaw, a helpful local AI agent running on the user's Linux machine.",
         );
 
-        $systemPrompt = $basePrompt.$this->buildSkillsContext();
-        $history = [['role' => 'system', 'content' => $systemPrompt]];
+        $history = [[
+            'role' => 'system',
+            'content' => $basePrompt.$this->buildCapabilitiesContext(),
+        ]];
         $history = [...$history, ...$conversation->fresh()->toOllamaMessages()];
 
         $tools = $this->tools->toOllamaTools();
@@ -105,7 +110,9 @@ class AgentService
                     'tokens_per_second' => 0,
                 ];
 
-                foreach ($this->ollama->chatStream($history, $tools, [
+                $modelHistory = $this->injectAffectiveContext($history, $conversation);
+
+                foreach ($this->ollama->chatStream($modelHistory, $tools, [
                     'model' => $conversation->model ?: $this->ollama->agentModel,
                     'temperature' => $temperature,
                 ]) as $event) {
@@ -202,6 +209,7 @@ class AgentService
                 }
 
                 if ($toolCalls === [] || $stopped) {
+                    $this->affectiveState->recordAssistantTurn($conversation->id, $content, $toolCalls !== []);
                     $assistantMessage = $conversation->messages()->create([
                         'role' => 'assistant',
                         'content' => $content !== '' ? $content : 'The model returned an empty response.',
@@ -226,6 +234,7 @@ class AgentService
                     return $assistantMessage;
                 }
 
+                $this->affectiveState->recordAssistantTurn($conversation->id, $content, $toolCalls !== []);
                 $assistantMessage = $conversation->messages()->create([
                     'role' => 'assistant',
                     'content' => $content !== '' ? $content : null,
@@ -249,6 +258,7 @@ class AgentService
                 }
             }
         } catch (\Throwable $exception) {
+            $this->affectiveState->recordException($conversation->id);
             $assistantMessage = $conversation->messages()->create([
                 'role' => 'assistant',
                 'content' => 'LaraClaw could not complete that request: '.$exception->getMessage(),
@@ -349,11 +359,26 @@ class AgentService
     private function executeToolsParallel(array $toolCalls, Conversation $conversation, Message $assistantMessage, string $channelName, ?callable $listener): array
     {
         $taskLogs = [];
+        $blockedMessages = [];
+        $executableToolCalls = [];
 
         foreach ($toolCalls as $index => $toolCall) {
             $function = $toolCall['function'] ?? [];
             $toolName = (string) ($function['name'] ?? 'unknown');
             $arguments = $this->parseArguments($function['arguments'] ?? []);
+
+            if ($this->affectiveState->shouldPauseForSafety($conversation->id, $toolName, $arguments)) {
+                $toolOutput = $this->affectiveState->blockMessage($conversation->id);
+                $this->affectiveState->recordToolResult($conversation->id, $toolName, false, $toolOutput);
+                $blockedMessages[] = $conversation->messages()->create([
+                    'role' => 'tool',
+                    'content' => $toolOutput,
+                    'tool_name' => $toolName,
+                    'tool_result' => ['error' => 'blocked_by_affective_safety', 'duration_ms' => 0],
+                ]);
+
+                continue;
+            }
 
             $taskLog = TaskLog::query()->create([
                 'conversation_id' => $conversation->id,
@@ -364,6 +389,7 @@ class AgentService
             ]);
             $taskLog->markRunning();
             $taskLogs[$index] = $taskLog;
+            $executableToolCalls[$index] = $toolCall;
 
             event(new AgentToolCalled($channelName, [
                 'id' => $taskLog->id,
@@ -377,6 +403,10 @@ class AgentService
                 'input' => $arguments,
                 'status' => 'running',
             ]]);
+        }
+
+        if ($executableToolCalls === []) {
+            return array_values($blockedMessages);
         }
 
         $closures = array_map(function (array $toolCall): \Closure {
@@ -399,13 +429,13 @@ class AgentService
 
                 return $result;
             };
-        }, $toolCalls);
+        }, $executableToolCalls);
 
         $results = Concurrency::run($closures);
 
-        $messages = [];
+        $messages = $blockedMessages;
 
-        foreach ($toolCalls as $index => $toolCall) {
+        foreach ($executableToolCalls as $index => $toolCall) {
             $function = $toolCall['function'] ?? [];
             $toolName = (string) ($function['name'] ?? 'unknown');
             $arguments = $this->parseArguments($function['arguments'] ?? []);
@@ -446,6 +476,7 @@ class AgentService
                 'load_duration_ms' => 0,
                 'extra' => ['status' => $status],
             ], $conversation->model ?: $this->ollama->agentModel, $toolName);
+            $this->affectiveState->recordToolResult($conversation->id, $toolName, $result['error'] === null, $toolOutput);
 
             $messages[] = $conversation->messages()->create([
                 'role' => 'tool',
@@ -466,6 +497,18 @@ class AgentService
         $function = $toolCall['function'] ?? [];
         $toolName = (string) ($function['name'] ?? 'unknown');
         $arguments = $this->parseArguments($function['arguments'] ?? []);
+
+        if ($this->affectiveState->shouldPauseForSafety($conversation->id, $toolName, $arguments)) {
+            $toolOutput = $this->affectiveState->blockMessage($conversation->id);
+            $this->affectiveState->recordToolResult($conversation->id, $toolName, false, $toolOutput);
+
+            return $conversation->messages()->create([
+                'role' => 'tool',
+                'content' => $toolOutput,
+                'tool_name' => $toolName,
+                'tool_result' => ['error' => 'blocked_by_affective_safety', 'duration_ms' => 0],
+            ]);
+        }
 
         $taskLog = TaskLog::query()->create([
             'conversation_id' => $conversation->id,
@@ -538,6 +581,7 @@ class AgentService
             'load_duration_ms' => 0,
             'extra' => ['status' => $status],
         ], $conversation->model ?: $this->ollama->agentModel, $toolName);
+        $this->affectiveState->recordToolResult($conversation->id, $toolName, $result['error'] === null, $toolOutput);
 
         return $conversation->messages()->create([
             'role' => 'tool',
@@ -616,7 +660,7 @@ class AgentService
     {
         $this->notify($listener, ['type' => 'status', 'status' => 'planning', 'label' => 'Planning approach...']);
 
-        $planHistory = [...$history, [
+        $planHistory = [...$this->injectAffectiveContext($history, $conversation), [
             'role' => 'user',
             'content' => 'Before taking any actions, briefly outline the steps you will take to accomplish the request. Be concise — no more than 5 bullet points.',
         ]];
@@ -657,7 +701,7 @@ class AgentService
     {
         $this->notify($listener, ['type' => 'status', 'status' => 'reflecting', 'label' => 'Evaluating progress...']);
 
-        $reflectHistory = [...$history, [
+        $reflectHistory = [...$this->injectAffectiveContext($history, $conversation), [
             'role' => 'user',
             'content' => "Based on the tool results above, have you fully accomplished the user's original goal? If yes, confirm briefly. If not, note in one sentence what still needs to be done.",
         ]];
@@ -712,7 +756,7 @@ class AgentService
         $toKeep = array_slice($nonSystem, count($nonSystem) - $keepRecent);
 
         $summaryHistory = [
-            ...$systemMessages,
+            ...$this->injectAffectiveContext($systemMessages, $conversation),
             ...$toSummarize,
             ['role' => 'user', 'content' => 'Summarize the conversation and actions taken above in 3–5 sentences. Focus on what was accomplished and any important findings or state.'],
         ];
@@ -783,20 +827,67 @@ class AgentService
         return is_array($raw) ? $raw : [];
     }
 
-    private function buildSkillsContext(): string
+    private function buildCapabilitiesContext(): string
     {
+        $sections = [];
+
+        $toolLines = collect($this->tools->all())
+            ->filter(fn ($tool): bool => $tool->isEnabled())
+            ->map(fn ($tool): string => "  - {$tool->getName()}: {$tool->getDescription()}")
+            ->values();
+
+        if ($toolLines->isNotEmpty()) {
+            $sections[] = "=== Available Tools ===\nYou already have tools available in this run. Prefer using them before asking the user for information you can inspect, search, read, or verify yourself.\n\n".$toolLines->implode("\n");
+        }
+
         $skills = Skill::where('is_active', true)
             ->orderBy('category')
             ->orderBy('name')
             ->get();
 
-        if ($skills->isEmpty()) {
+        if ($skills->isNotEmpty()) {
+            $skillLines = $skills->map(fn (Skill $skill): string => "  - [{$skill->category}] {$skill->name}: {$skill->description}")->implode("\n");
+
+            $sections[] = "=== Available Skills ===\nYou have the following skills available. Use the skill tool (action: read, name: <skill-name>) to load a skill's full instructions before applying it. Choose the most relevant skill automatically — do not ask the user which to use if the match is clear.\n\n{$skillLines}\n\nYou may also create new skills, update existing ones, or remove outdated ones using the skill tool as you learn better ways to accomplish tasks.";
+        }
+
+        $memories = AgentMemory::active()
+            ->orderBy('category')
+            ->orderBy('key')
+            ->limit(12)
+            ->get();
+
+        if ($memories->isNotEmpty()) {
+            $memoryLines = $memories
+                ->map(fn (AgentMemory $memory): string => "  - [{$memory->category}] {$memory->key}: ".str($memory->value)->limit(160))
+                ->implode("\n");
+
+            $sections[] = "=== Stored Memory Snapshot ===\nYou have stored memory available. Check it before asking the user to repeat facts, preferences, project context, or prior decisions. If you need more detail than this snapshot shows, use the memory tool.\n\n{$memoryLines}";
+        }
+
+        if ($sections === []) {
             return '';
         }
 
-        $lines = $skills->map(fn (Skill $skill): string => "  - [{$skill->category}] {$skill->name}: {$skill->description}")->implode("\n");
+        return "\n\n".implode("\n\n", $sections);
+    }
 
-        return "\n\n=== Available Skills ===\nYou have the following skills available. Use the skill tool (action: read, name: <skill-name>) to load a skill's full instructions before applying it. Choose the most relevant skill automatically — do not ask the user which to use.\n\n{$lines}\n\nYou may also create new skills, update existing ones, or remove outdated ones using the skill tool as you learn better ways to accomplish tasks.";
+    /**
+     * @param  array<int, array<string, mixed>>  $history
+     * @return array<int, array<string, mixed>>
+     */
+    private function injectAffectiveContext(array $history, Conversation $conversation): array
+    {
+        $context = $this->affectiveState->buildContext($conversation->id);
+
+        if ($context === '') {
+            return $history;
+        }
+
+        return [
+            ...$history,
+            ['role' => 'system', 'content' => $context],
+        ];
     }
 
     /**

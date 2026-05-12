@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Agent\AffectiveStateEngine;
+use App\Services\Agent\AffectiveStateStore;
 use App\Services\Agent\AgentRunState;
 use App\Services\Agent\AgentService;
 use App\Services\Agent\OllamaService;
@@ -33,6 +35,14 @@ class AgentServiceProvider extends ServiceProvider
             AgentRunState::class,
             fn ($app): AgentRunState => new AgentRunState($app->make(CacheFactory::class)->store('file')),
         );
+        $this->app->singleton(
+            AffectiveStateStore::class,
+            fn ($app): AffectiveStateStore => new AffectiveStateStore($app->make(CacheFactory::class)->store('file')),
+        );
+        $this->app->singleton(
+            AffectiveStateEngine::class,
+            fn ($app): AffectiveStateEngine => new AffectiveStateEngine($app->make(AffectiveStateStore::class)),
+        );
         $this->app->singleton(VectorStore::class, fn (): VectorStore => new VectorStore);
         $this->app->singleton(
             EmbeddingService::class,
@@ -62,6 +72,7 @@ class AgentServiceProvider extends ServiceProvider
                 $app->make(OllamaService::class),
                 $app->make(ToolRegistry::class),
                 $app->make(AgentRunState::class),
+                $app->make(AffectiveStateEngine::class),
             ),
         );
     }

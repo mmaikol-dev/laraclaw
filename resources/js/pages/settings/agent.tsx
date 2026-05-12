@@ -19,7 +19,19 @@ type AgentSettingsPayload = {
     max_file_size_mb: number;
     enable_shell: boolean;
     enable_web: boolean;
+    enable_planning: boolean;
+    enable_affective_state: boolean;
+    enable_reflection: boolean;
+    parallel_tools: boolean;
     shell_timeout: number;
+    max_iterations: number;
+    summarize_after_messages: number;
+    max_tool_retries: number;
+    fear_threshold: string;
+    sadness_threshold: number;
+    anger_cap: number;
+    curiosity_threshold: string;
+    boredom_threshold: number;
     temperature: string;
     context_length: number;
     system_prompt: string;
@@ -42,7 +54,19 @@ const emptySettings: AgentSettingsPayload = {
     max_file_size_mb: 10,
     enable_shell: true,
     enable_web: true,
+    enable_planning: true,
+    enable_affective_state: true,
+    enable_reflection: true,
+    parallel_tools: false,
     shell_timeout: 30,
+    max_iterations: 24,
+    summarize_after_messages: 18,
+    max_tool_retries: 1,
+    fear_threshold: '0.6',
+    sadness_threshold: 2,
+    anger_cap: 2,
+    curiosity_threshold: '0.45',
+    boredom_threshold: 2,
     temperature: '0.7',
     context_length: 8192,
     system_prompt: '',
@@ -221,6 +245,70 @@ export default function AgentSettings() {
                                             {settings.enable_web ? 'On' : 'Off'}
                                         </Toggle>
                                     </div>
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="enable_planning">Enable planning</Label>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Makes LaraClaw outline a short plan before acting.
+                                            </p>
+                                        </div>
+                                        <Toggle
+                                            id="enable_planning"
+                                            pressed={settings.enable_planning}
+                                            onPressedChange={(value) => updateSetting('enable_planning', value)}
+                                            variant="outline"
+                                        >
+                                            {settings.enable_planning ? 'On' : 'Off'}
+                                        </Toggle>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="enable_affective_state">Enable affective state</Label>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Adds caution, reflection, persistence, and exploration biases based on recent outcomes.
+                                            </p>
+                                        </div>
+                                        <Toggle
+                                            id="enable_affective_state"
+                                            pressed={settings.enable_affective_state}
+                                            onPressedChange={(value) => updateSetting('enable_affective_state', value)}
+                                            variant="outline"
+                                        >
+                                            {settings.enable_affective_state ? 'On' : 'Off'}
+                                        </Toggle>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="enable_reflection">Enable reflection</Label>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                After tool work, LaraClaw checks whether the request is actually finished.
+                                            </p>
+                                        </div>
+                                        <Toggle
+                                            id="enable_reflection"
+                                            pressed={settings.enable_reflection}
+                                            onPressedChange={(value) => updateSetting('enable_reflection', value)}
+                                            variant="outline"
+                                        >
+                                            {settings.enable_reflection ? 'On' : 'Off'}
+                                        </Toggle>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="parallel_tools">Parallel tool execution</Label>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Leave this off for more orderly step-by-step execution. Turn it on only for clearly independent tasks.
+                                            </p>
+                                        </div>
+                                        <Toggle
+                                            id="parallel_tools"
+                                            pressed={settings.parallel_tools}
+                                            onPressedChange={(value) => updateSetting('parallel_tools', value)}
+                                            variant="outline"
+                                        >
+                                            {settings.parallel_tools ? 'On' : 'Off'}
+                                        </Toggle>
+                                    </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="shell_timeout">Shell timeout (seconds)</Label>
                                         <Input
@@ -230,10 +318,106 @@ export default function AgentSettings() {
                                             onChange={(event) => updateSetting('shell_timeout', Number(event.target.value))}
                                         />
                                     </div>
+                                    <div className="grid gap-4 md:grid-cols-3">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="max_iterations">Max iterations</Label>
+                                            <Input
+                                                id="max_iterations"
+                                                type="number"
+                                                value={settings.max_iterations}
+                                                onChange={(event) => updateSetting('max_iterations', Number(event.target.value))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="summarize_after_messages">Summarize after messages</Label>
+                                            <Input
+                                                id="summarize_after_messages"
+                                                type="number"
+                                                value={settings.summarize_after_messages}
+                                                onChange={(event) => updateSetting('summarize_after_messages', Number(event.target.value))}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="max_tool_retries">Max tool retries</Label>
+                                            <Input
+                                                id="max_tool_retries"
+                                                type="number"
+                                                value={settings.max_tool_retries}
+                                                onChange={(event) => updateSetting('max_tool_retries', Number(event.target.value))}
+                                            />
+                                        </div>
+                                    </div>
                                     <p className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <Globe className="size-4" />
                                         Get your free Brave Search API key at api.search.brave.com.
                                     </p>
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardHeader>
+                                    <div className="flex items-center gap-3">
+                                        <ShieldAlert className="size-5 text-fuchsia-600" />
+                                        <div>
+                                            <CardTitle>Affective behavior</CardTitle>
+                                            <CardDescription>
+                                                Tune when the agent becomes cautious, reflective, persistent, curious, or strategy-shifting.
+                                            </CardDescription>
+                                        </div>
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="fear_threshold">Fear threshold</Label>
+                                        <Input
+                                            id="fear_threshold"
+                                            type="number"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={settings.fear_threshold}
+                                            onChange={(event) => updateSetting('fear_threshold', event.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="sadness_threshold">Sadness threshold</Label>
+                                        <Input
+                                            id="sadness_threshold"
+                                            type="number"
+                                            value={settings.sadness_threshold}
+                                            onChange={(event) => updateSetting('sadness_threshold', Number(event.target.value))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="anger_cap">Anger cap</Label>
+                                        <Input
+                                            id="anger_cap"
+                                            type="number"
+                                            value={settings.anger_cap}
+                                            onChange={(event) => updateSetting('anger_cap', Number(event.target.value))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="curiosity_threshold">Curiosity threshold</Label>
+                                        <Input
+                                            id="curiosity_threshold"
+                                            type="number"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={settings.curiosity_threshold}
+                                            onChange={(event) => updateSetting('curiosity_threshold', event.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="boredom_threshold">Boredom threshold</Label>
+                                        <Input
+                                            id="boredom_threshold"
+                                            type="number"
+                                            value={settings.boredom_threshold}
+                                            onChange={(event) => updateSetting('boredom_threshold', Number(event.target.value))}
+                                        />
+                                    </div>
                                 </CardContent>
                             </Card>
 

@@ -7,15 +7,33 @@ use App\Http\Requests\UpdateAgentSettingsRequest;
 use App\Models\AgentSetting;
 use App\Models\Conversation;
 use App\Models\TaskLog;
+use Database\Seeders\AgentSettingsSeeder;
 use Illuminate\Http\JsonResponse;
 
 class SettingsController extends Controller
 {
     public function index(): JsonResponse
     {
+        $defaults = collect(AgentSettingsSeeder::defaults())
+            ->mapWithKeys(fn (array $setting): array => [
+                $setting['key'] => AgentSetting::castStoredValue($setting['type'], $setting['value']),
+            ])
+            ->all();
+
         return response()->json([
-            'data' => AgentSetting::allAsArray(),
+            'data' => [
+                ...$defaults,
+                ...$this->storedSettings(),
+            ],
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function storedSettings(): array
+    {
+        return AgentSetting::allAsArray();
     }
 
     public function update(UpdateAgentSettingsRequest $request): JsonResponse

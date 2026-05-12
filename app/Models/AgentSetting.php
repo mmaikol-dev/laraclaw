@@ -19,7 +19,11 @@ class AgentSetting extends Model
 
     public static function get(string $key, mixed $default = null): mixed
     {
-        $setting = self::query()->where('key', $key)->first();
+        try {
+            $setting = self::query()->where('key', $key)->first();
+        } catch (\Throwable) {
+            return $default;
+        }
 
         if ($setting === null) {
             return $default;
@@ -36,9 +40,12 @@ class AgentSetting extends Model
             default => json_encode($value, JSON_THROW_ON_ERROR),
         };
 
-        self::query()->where('key', $key)->update([
-            'value' => $serializedValue,
-        ]);
+        try {
+            self::query()->where('key', $key)->update([
+                'value' => $serializedValue,
+            ]);
+        } catch (\Throwable) {
+        }
     }
 
     /**
@@ -46,10 +53,14 @@ class AgentSetting extends Model
      */
     public static function allAsArray(): array
     {
-        return self::query()
-            ->get()
-            ->mapWithKeys(fn (self $setting): array => [$setting->key => $setting->castValue()])
-            ->all();
+        try {
+            return self::query()
+                ->get()
+                ->mapWithKeys(fn (self $setting): array => [$setting->key => $setting->castValue()])
+                ->all();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     protected function castValue(): mixed
