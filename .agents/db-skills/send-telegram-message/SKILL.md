@@ -11,7 +11,7 @@ dependencies: []
 
 To send a Telegram message to the user:
 
-1. Replace `YOUR_BOT_TOKEN` with `8579905866:AAG-CunYA_7m3dXNqo4lydFFdByOBJro0Mg`  
+1. Replace `YOUR_BOT_TOKEN` with `[]`  
 2. Replace `YOUR_CHAT_ID` with `8144561484`  
 3. Replace `YOUR_MESSAGE_TEXT` with the actual message content (URL-encoded if needed)  
 4. Use the Telegram Bot API endpoint:  
@@ -20,7 +20,7 @@ To send a Telegram message to the user:
 You can use the `web` tool with `action: fetch` or `action: extract` to call this endpoint.
 
 Example message:  
-`https://api.telegram.org/bot8579905866:AAG-CunYA_7m3dXNqo4lydFFdByOBJro0Mg/sendMessage?chat_id=8144561484&text=Hello%2C%20this%20is%20a%20test%20message!`
+`https://api.telegram.org/bot[]/sendMessage?chat_id=8144561484&text=Hello%2C%20this%20is%20a%20test%20message!`
 
 Important:  
 - Always use URL encoding for special characters (e.g., space → `%20`, comma → `,` is safe, but avoid unencoded `&`, `=`, or `?`).  
