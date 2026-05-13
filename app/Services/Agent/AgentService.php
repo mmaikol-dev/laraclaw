@@ -22,6 +22,10 @@ class AgentService
         protected ToolRegistry $tools,
         protected AgentRunState $runState,
         protected AffectiveStateEngine $affectiveState,
+        protected GoalOwnershipService $goalOwnership,
+        protected RoleProfileService $roleProfiles,
+        protected ProactiveMonitoringService $proactiveMonitoring,
+        protected AgentIdentityService $identity,
     ) {}
 
     /**
@@ -31,6 +35,10 @@ class AgentService
     {
         $this->runState->begin($conversation->id);
         $this->affectiveState->begin($conversation->id, $userMessage);
+        $roleProfile = $this->roleProfiles->resolveForConversation($conversation, $userMessage);
+        $this->goalOwnership->beginRun($conversation, $userMessage, $roleProfile?->name);
+        $environment = $this->proactiveMonitoring->refreshEnvironmentAwareness();
+        $this->proactiveMonitoring->refreshFindings();
         $this->notify($listener, [
             'type' => 'status',
             'status' => 'queued',
@@ -55,7 +63,12 @@ class AgentService
 
         $history = [[
             'role' => 'system',
-            'content' => $basePrompt.$this->buildCapabilitiesContext(),
+            'content' => $basePrompt
+                .$this->buildCapabilitiesContext()
+                .$this->roleProfiles->buildPromptContext($roleProfile)
+                .$this->goalOwnership->buildPromptContext($conversation)
+                .$this->identity->buildPromptContext($conversation, $userMessage)
+                .$this->proactiveMonitoring->buildPromptContext($environment),
         ]];
         $history = [...$history, ...$conversation->fresh()->toOllamaMessages()];
 
@@ -225,6 +238,8 @@ class AgentService
 
                     event(new AgentFinished($channelName, $assistantMessage->id, $stats));
                     $this->runState->finish($conversation->id, $assistantMessage->id, $stats);
+                    $this->goalOwnership->finalizeRun($conversation->fresh(), $assistantMessage);
+                    $this->identity->rememberRunOutcome($conversation->fresh(), $assistantMessage->content ?? '');
                     $this->notify($listener, [
                         'type' => 'done',
                         'message_id' => $assistantMessage->id,
@@ -264,6 +279,8 @@ class AgentService
                 'content' => 'LaraClaw could not complete that request: '.$exception->getMessage(),
             ]);
             $this->runState->fail($conversation->id, 'The agent run failed.');
+            $this->goalOwnership->finalizeRun($conversation->fresh(), $assistantMessage);
+            $this->identity->rememberRunOutcome($conversation->fresh(), $assistantMessage->content ?? '', 'failure');
             $this->notify($listener, ['type' => 'error', 'message' => $exception->getMessage()]);
 
             $emptyStats = ['tokens_per_second' => 0, 'prompt_tokens' => 0, 'completion_tokens' => 0, 'total_duration_ms' => 0, 'load_duration_ms' => 0];
@@ -281,6 +298,8 @@ class AgentService
         $assistantMessage = $conversation->messages()->create(['role' => 'assistant', 'content' => $reason]);
         $emptyStats = ['tokens_per_second' => 0, 'prompt_tokens' => 0, 'completion_tokens' => 0, 'total_duration_ms' => 0, 'load_duration_ms' => 0];
         $this->runState->finish($conversation->id, $assistantMessage->id, $emptyStats);
+        $this->goalOwnership->finalizeRun($conversation->fresh(), $assistantMessage);
+        $this->identity->rememberRunOutcome($conversation->fresh(), $assistantMessage->content ?? '', 'continuity');
         $this->notify($listener, ['type' => 'done', 'message_id' => $assistantMessage->id, 'stats' => $emptyStats]);
         event(new AgentFinished($channelName, $assistantMessage->id, $emptyStats));
 

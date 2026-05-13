@@ -6,9 +6,12 @@ use App\Jobs\ContinueProjectJob;
 use App\Jobs\RunScheduledTaskJob;
 use App\Models\AgentMemory;
 use App\Models\AgentReport;
+use App\Models\ProactiveFinding;
 use App\Models\Project;
 use App\Models\ScheduledTask;
 use App\Models\Trigger;
+use App\Services\Agent\ProactiveMonitoringService;
+use App\Services\Agent\RoleProfileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,6 +19,11 @@ use Inertia\Response;
 
 class EmployeeController extends Controller
 {
+    public function __construct(
+        protected RoleProfileService $roleProfiles,
+        protected ProactiveMonitoringService $proactiveMonitoring,
+    ) {}
+
     public function index(): Response
     {
         return Inertia::render('employee/index');
@@ -23,7 +31,11 @@ class EmployeeController extends Controller
 
     public function overview(): JsonResponse
     {
+        $environment = $this->proactiveMonitoring->refreshEnvironmentAwareness();
+        $this->proactiveMonitoring->refreshFindings();
+
         return response()->json([
+            'environment' => $environment,
             'scheduled_tasks' => ScheduledTask::orderBy('name')->get()->map(fn ($t) => [
                 'id' => $t->id,
                 'name' => $t->name,
@@ -69,8 +81,12 @@ class EmployeeController extends Controller
                 'key' => $m->key,
                 'value' => $m->value,
                 'category' => $m->category,
+                'scope' => $m->scope,
+                'source' => $m->source,
+                'confidence' => $m->confidence,
                 'tags' => $m->tags,
                 'expires_at' => $m->expires_at?->toIso8601String(),
+                'last_observed_at' => $m->last_observed_at?->toIso8601String(),
                 'updated_at' => $m->updated_at?->toIso8601String(),
             ]),
             'reports' => AgentReport::orderByDesc('created_at')->limit(20)->get()->map(fn ($r) => [
@@ -81,6 +97,32 @@ class EmployeeController extends Controller
                 'content' => $r->content,
                 'created_at' => $r->created_at?->toIso8601String(),
             ]),
+            'role_profiles' => $this->roleProfiles->activeProfiles()->map(fn ($profile) => [
+                'id' => $profile->id,
+                'slug' => $profile->slug,
+                'name' => $profile->name,
+                'description' => $profile->description,
+                'preferred_tools' => $profile->preferred_tools,
+                'workflow_patterns' => $profile->workflow_patterns,
+                'responsibility_scope' => $profile->responsibility_scope,
+                'escalation_rules' => $profile->escalation_rules,
+            ])->values(),
+            'findings' => ProactiveFinding::query()
+                ->where('status', 'open')
+                ->orderByRaw("FIELD(severity,'high','medium','low')")
+                ->latest('detected_at')
+                ->limit(20)
+                ->get()
+                ->map(fn ($finding) => [
+                    'id' => $finding->id,
+                    'category' => $finding->category,
+                    'severity' => $finding->severity,
+                    'status' => $finding->status,
+                    'title' => $finding->title,
+                    'summary' => $finding->summary,
+                    'details' => $finding->details,
+                    'detected_at' => $finding->detected_at?->toIso8601String(),
+                ])->values(),
         ]);
     }
 

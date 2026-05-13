@@ -37,6 +37,9 @@ class MemoryTool extends BaseTool
                 'key' => ['type' => 'string', 'description' => 'Memory key (required for set/get/delete).'],
                 'value' => ['type' => 'string', 'description' => 'Value to store (required for set).'],
                 'category' => ['type' => 'string', 'description' => 'Category tag e.g. "user", "project", "fact" (set/list).'],
+                'scope' => ['type' => 'string', 'description' => 'Memory scope: global, user, project, environment, workflow, conversation.'],
+                'source' => ['type' => 'string', 'description' => 'Where this memory came from, e.g. user, agent-run, environment-monitor.'],
+                'confidence' => ['type' => 'number', 'description' => 'Confidence from 0.0 to 1.0.'],
                 'tags' => ['type' => 'array', 'description' => 'Optional string tags for set action.'],
                 'ttl_days' => ['type' => 'integer', 'description' => 'Days until this memory expires (set). Omit for permanent.'],
                 'query' => ['type' => 'string', 'description' => 'Keyword to search for (search).'],
@@ -74,8 +77,12 @@ class MemoryTool extends BaseTool
         AgentMemory::updateOrCreate(['key' => $key], [
             'value' => $value,
             'category' => (string) ($args['category'] ?? 'general'),
+            'scope' => (string) ($args['scope'] ?? 'global'),
+            'source' => (string) ($args['source'] ?? 'agent'),
+            'confidence' => min(1, max(0, (float) ($args['confidence'] ?? 1))),
             'tags' => is_array($args['tags'] ?? null) ? $args['tags'] : null,
             'expires_at' => $expiresAt,
+            'last_observed_at' => now(),
         ]);
 
         return "Memory '{$key}' saved.".($expiresAt ? " Expires: {$expiresAt->toDateString()}." : '');
@@ -93,7 +100,7 @@ class MemoryTool extends BaseTool
             return "No memory found for key '{$key}'.";
         }
 
-        return "[{$mem->category}] {$mem->key}: {$mem->value}".
+        return "[{$mem->scope}/{$mem->category}] {$mem->key}: {$mem->value}".
             ($mem->expires_at ? " (expires {$mem->expires_at->toDateString()})" : '');
     }
 
@@ -111,7 +118,7 @@ class MemoryTool extends BaseTool
             return "No memories found matching '{$query}'.";
         }
 
-        $lines = $memories->map(fn ($m) => "  [{$m->category}] {$m->key}: {$m->value}")->implode("\n");
+        $lines = $memories->map(fn ($m) => "  [{$m->scope}/{$m->category}] {$m->key}: {$m->value}")->implode("\n");
 
         return "Found {$memories->count()} memories:\n\n{$lines}";
     }
@@ -130,7 +137,7 @@ class MemoryTool extends BaseTool
             return 'No memories stored yet.';
         }
 
-        $lines = $memories->map(fn ($m) => "  [{$m->category}] {$m->key}: ".str($m->value)->limit(120)
+        $lines = $memories->map(fn ($m) => "  [{$m->scope}/{$m->category}] {$m->key}: ".str($m->value)->limit(120)
         )->implode("\n");
 
         return "Memories ({$memories->count()}):\n\n{$lines}";

@@ -4,15 +4,20 @@ namespace App\Providers;
 
 use App\Services\Agent\AffectiveStateEngine;
 use App\Services\Agent\AffectiveStateStore;
+use App\Services\Agent\AgentIdentityService;
 use App\Services\Agent\AgentRunState;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\GoalOwnershipService;
 use App\Services\Agent\OllamaService;
+use App\Services\Agent\ProactiveMonitoringService;
+use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
 use App\Services\Embedding\EmbeddingService;
 use App\Services\Embedding\VectorStore;
 use App\Services\Tools\BrowserTool;
 use App\Services\Tools\DocumentTool;
 use App\Services\Tools\FileTool;
+use App\Services\Tools\GoogleSheetsTool;
 use App\Services\Tools\MemoryTool;
 use App\Services\Tools\ProjectTool;
 use App\Services\Tools\ScheduledTaskTool;
@@ -43,6 +48,10 @@ class AgentServiceProvider extends ServiceProvider
             AffectiveStateEngine::class,
             fn ($app): AffectiveStateEngine => new AffectiveStateEngine($app->make(AffectiveStateStore::class)),
         );
+        $this->app->singleton(GoalOwnershipService::class, fn (): GoalOwnershipService => new GoalOwnershipService);
+        $this->app->singleton(RoleProfileService::class, fn (): RoleProfileService => new RoleProfileService);
+        $this->app->singleton(ProactiveMonitoringService::class, fn (): ProactiveMonitoringService => new ProactiveMonitoringService);
+        $this->app->singleton(AgentIdentityService::class, fn (): AgentIdentityService => new AgentIdentityService);
         $this->app->singleton(VectorStore::class, fn (): VectorStore => new VectorStore);
         $this->app->singleton(
             EmbeddingService::class,
@@ -56,6 +65,7 @@ class AgentServiceProvider extends ServiceProvider
             $registry->register(new FileTool);
             $registry->register(new ShellTool);
             $registry->register(new WebTool);
+            $registry->register(new GoogleSheetsTool);
             $registry->register(new BrowserTool);
             $registry->register(new DocumentTool($app->make(EmbeddingService::class)));
             $registry->register(new SkillTool);
@@ -73,6 +83,10 @@ class AgentServiceProvider extends ServiceProvider
                 $app->make(ToolRegistry::class),
                 $app->make(AgentRunState::class),
                 $app->make(AffectiveStateEngine::class),
+                $app->make(GoalOwnershipService::class),
+                $app->make(RoleProfileService::class),
+                $app->make(ProactiveMonitoringService::class),
+                $app->make(AgentIdentityService::class),
             ),
         );
     }

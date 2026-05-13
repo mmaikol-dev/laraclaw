@@ -2,6 +2,7 @@
 
 use App\Jobs\CheckTriggersJob;
 use App\Jobs\GenerateDailyReportJob;
+use App\Jobs\RefreshProactiveFindingsJob;
 use App\Jobs\RunScheduledTaskJob;
 use App\Models\ScheduledTask;
 use Illuminate\Foundation\Inspiring;
@@ -23,6 +24,9 @@ Schedule::call(function (): void {
 
 // Check file watcher and URL monitor triggers every 5 minutes
 Schedule::job(CheckTriggersJob::class)->everyFiveMinutes()->name('check-triggers')->withoutOverlapping();
+
+// Refresh operational findings in the background
+Schedule::job(RefreshProactiveFindingsJob::class)->everyFifteenMinutes()->name('refresh-proactive-findings')->withoutOverlapping();
 
 // Generate daily report at 11:55pm every day
 Schedule::job(GenerateDailyReportJob::class)->dailyAt('23:55')->name('daily-report')->withoutOverlapping();

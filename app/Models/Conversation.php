@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Conversation extends Model
@@ -14,6 +15,16 @@ class Conversation extends Model
     protected $fillable = [
         'title',
         'model',
+        'role_profile_id',
+        'identity_label',
+        'active_goal',
+        'completion_criteria',
+        'verification_status',
+        'verification_notes',
+        'next_action',
+        'resumable_state',
+        'last_verified_at',
+        'last_resumed_at',
         'system_prompt',
         'total_tokens',
         'is_archived',
@@ -23,8 +34,17 @@ class Conversation extends Model
     {
         return [
             'system_prompt' => 'array',
+            'completion_criteria' => 'array',
+            'resumable_state' => 'array',
             'is_archived' => 'boolean',
+            'last_verified_at' => 'datetime',
+            'last_resumed_at' => 'datetime',
         ];
+    }
+
+    public function roleProfile(): BelongsTo
+    {
+        return $this->belongsTo(AgentRoleProfile::class, 'role_profile_id');
     }
 
     public function messages(): HasMany

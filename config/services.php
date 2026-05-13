@@ -45,4 +45,11 @@ return [
         'cdp_port' => env('CHROME_CDP_PORT', ''),
     ],
 
+    'google' => [
+        'sheets_service_account' => env(
+            'GOOGLE_SHEETS_SERVICE_ACCOUNT',
+            storage_path('rdl-478707-2c066429878f.json'),
+        ),
+    ],
+
 ];

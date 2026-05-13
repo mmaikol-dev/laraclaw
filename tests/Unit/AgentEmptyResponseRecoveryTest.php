@@ -2,9 +2,14 @@
 
 namespace Tests\Unit;
 
+use App\Services\Agent\AffectiveStateEngine;
+use App\Services\Agent\AgentIdentityService;
 use App\Services\Agent\AgentRunState;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\GoalOwnershipService;
 use App\Services\Agent\OllamaService;
+use App\Services\Agent\ProactiveMonitoringService;
+use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
 use Mockery;
 use Tests\TestCase;
@@ -43,6 +48,11 @@ class AgentEmptyResponseRecoveryTest extends TestCase
             $ollama,
             Mockery::mock(ToolRegistry::class),
             Mockery::mock(AgentRunState::class),
+            Mockery::mock(AffectiveStateEngine::class),
+            Mockery::mock(GoalOwnershipService::class),
+            Mockery::mock(RoleProfileService::class),
+            Mockery::mock(ProactiveMonitoringService::class),
+            Mockery::mock(AgentIdentityService::class),
         );
 
         $method = new \ReflectionMethod($service, 'recoverEmptyResponse');
@@ -59,6 +69,11 @@ class AgentEmptyResponseRecoveryTest extends TestCase
             Mockery::mock(OllamaService::class),
             Mockery::mock(ToolRegistry::class),
             Mockery::mock(AgentRunState::class),
+            Mockery::mock(AffectiveStateEngine::class),
+            Mockery::mock(GoalOwnershipService::class),
+            Mockery::mock(RoleProfileService::class),
+            Mockery::mock(ProactiveMonitoringService::class),
+            Mockery::mock(AgentIdentityService::class),
         );
 
         $method = new \ReflectionMethod($service, 'shouldRecoverEmptyResponse');

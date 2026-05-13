@@ -16,6 +16,7 @@ import {
     PlayCircle,
     Plus,
     RefreshCw,
+    ShieldAlert,
     Tag,
     Trash2,
     Webhook,
@@ -90,8 +91,12 @@ type Memory = {
     key: string;
     value: string;
     category: string | null;
+    scope: string | null;
+    source: string | null;
+    confidence: number | null;
     tags: string[] | null;
     expires_at: string | null;
+    last_observed_at: string | null;
     updated_at: string | null;
 };
 
@@ -104,12 +109,50 @@ type Report = {
     created_at: string | null;
 };
 
+type EnvironmentSummary = {
+    working_dir: string;
+    allowed_paths: string[];
+    stack: string[];
+    repo_signals: string[];
+    disk: {
+        free_bytes: number;
+        total_bytes: number;
+        free_percent: number;
+    };
+    git_repository: boolean;
+};
+
+type RoleProfile = {
+    id: number;
+    slug: string;
+    name: string;
+    description: string;
+    preferred_tools: string[] | null;
+    workflow_patterns: string[] | null;
+    responsibility_scope: string | null;
+    escalation_rules: string | null;
+};
+
+type Finding = {
+    id: number;
+    category: string | null;
+    severity: string;
+    status: string;
+    title: string;
+    summary: string | null;
+    details: string | null;
+    detected_at: string | null;
+};
+
 type OverviewData = {
+    environment: EnvironmentSummary;
     scheduled_tasks: ScheduledTask[];
     projects: Project[];
     triggers: Trigger[];
     memories: Memory[];
     reports: Report[];
+    role_profiles: RoleProfile[];
+    findings: Finding[];
 };
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Employee', href: employeeRoute() }];
@@ -142,6 +185,9 @@ const STATUS_BADGE: Record<string, string> = {
     paused: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
     completed: 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400',
     failed: 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400',
+    high: 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400',
+    medium: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950/50 dark:text-yellow-400',
+    low: 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-400',
 };
 
 const TRIGGER_TYPE_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
@@ -162,7 +208,7 @@ export default function EmployeeIndex() {
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState<Record<string, boolean>>({});
     const [showForm, setShowForm] = useState(false);
-    const [tab, setTab] = useState<'tasks' | 'projects' | 'triggers' | 'memories' | 'reports'>('tasks');
+    const [tab, setTab] = useState<'tasks' | 'projects' | 'triggers' | 'memories' | 'reports' | 'findings' | 'roles'>('tasks');
     const [expandedProjects, setExpandedProjects] = useState<Set<number>>(new Set());
     const [expandedReports, setExpandedReports] = useState<Set<number>>(new Set());
 
@@ -229,6 +275,32 @@ export default function EmployeeIndex() {
                     </div>
                 ) : (
                     <div>
+                        {data && (
+                            <div className="mb-4 grid gap-3 md:grid-cols-3">
+                                <Card>
+                                    <CardContent className="pt-5">
+                                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Environment</p>
+                                        <p className="mt-1 font-medium">{data.environment.stack.length > 0 ? data.environment.stack.join(' · ') : 'Workspace detected'}</p>
+                                        <p className="mt-1 truncate text-xs text-muted-foreground">{data.environment.working_dir}</p>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardContent className="pt-5">
+                                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Disk headroom</p>
+                                        <p className="mt-1 font-medium">{data.environment.disk.free_percent}% free</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">{data.environment.git_repository ? 'Git repository detected' : 'No git repository detected'}</p>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardContent className="pt-5">
+                                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Open findings</p>
+                                        <p className="mt-1 font-medium">{data.findings.length}</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">{data.role_profiles.length} active role profiles available</p>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        )}
+
                         <div className="flex flex-wrap gap-1 border-b pb-0">
                             {([
                                 { key: 'tasks', label: 'Scheduled Tasks', icon: CalendarClock, count: data?.scheduled_tasks.length },
@@ -236,6 +308,8 @@ export default function EmployeeIndex() {
                                 { key: 'triggers', label: 'Triggers', icon: Zap, count: data?.triggers.length },
                                 { key: 'memories', label: 'Memories', icon: BrainCircuit, count: data?.memories.length },
                                 { key: 'reports', label: 'Reports', icon: FileText, count: data?.reports.length },
+                                { key: 'findings', label: 'Findings', icon: ShieldAlert, count: data?.findings.length },
+                                { key: 'roles', label: 'Roles', icon: BrainCircuit, count: data?.role_profiles.length },
                             ] as const).map(({ key, label, icon: Icon, count }) => (
                                 <button
                                     key={key}
@@ -455,6 +529,9 @@ export default function EmployeeIndex() {
                                                     {memory.category && (
                                                         <Badge variant="secondary" className="text-xs">{memory.category}</Badge>
                                                     )}
+                                                    {memory.scope && (
+                                                        <Badge variant="outline" className="text-xs">{memory.scope}</Badge>
+                                                    )}
                                                     {memory.expires_at && (
                                                         <span className="text-xs text-muted-foreground">expires {formatRelative(memory.expires_at)}</span>
                                                     )}
@@ -468,7 +545,11 @@ export default function EmployeeIndex() {
                                                         ))}
                                                     </div>
                                                 )}
-                                                <p className="text-xs text-muted-foreground">Updated {formatRelative(memory.updated_at)}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Observed {formatRelative(memory.last_observed_at ?? memory.updated_at)}
+                                                    {memory.source ? ` · ${memory.source}` : ''}
+                                                    {memory.confidence != null ? ` · ${Math.round(memory.confidence * 100)}% confidence` : ''}
+                                                </p>
                                             </div>
                                             <Button
                                                 size="sm"
@@ -517,6 +598,68 @@ export default function EmployeeIndex() {
                                         </Card>
                                     );
                                 })
+                            )}
+                        </div>
+
+                        {/* ── Findings ── */}
+                        <div className={`mt-4 space-y-3 ${tab !== 'findings' ? 'hidden' : ''}`}>
+                            {!data || data.findings.length === 0 ? (
+                                <EmptyState icon={ShieldAlert} label="No active proactive findings." hint="The background monitor has not detected any current operational issues." />
+                            ) : (
+                                data.findings.map((finding) => (
+                                    <Card key={finding.id}>
+                                        <CardContent className="pt-4">
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="font-medium">{finding.title}</span>
+                                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[finding.severity] ?? STATUS_BADGE.pending}`}>
+                                                            {finding.severity}
+                                                        </span>
+                                                        {finding.category && (
+                                                            <Badge variant="outline" className="text-xs">{finding.category}</Badge>
+                                                        )}
+                                                    </div>
+                                                    {finding.summary && <p className="mt-1 text-sm text-muted-foreground">{finding.summary}</p>}
+                                                    {finding.details && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{finding.details}</p>}
+                                                </div>
+                                                <span className="text-xs text-muted-foreground">Detected {formatRelative(finding.detected_at)}</span>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                ))
+                            )}
+                        </div>
+
+                        {/* ── Roles ── */}
+                        <div className={`mt-4 space-y-3 ${tab !== 'roles' ? 'hidden' : ''}`}>
+                            {!data || data.role_profiles.length === 0 ? (
+                                <EmptyState icon={BrainCircuit} label="No role profiles available." hint="Role specialization profiles will appear here once they are seeded." />
+                            ) : (
+                                data.role_profiles.map((profile) => (
+                                    <Card key={profile.id}>
+                                        <CardContent className="pt-4">
+                                            <div className="space-y-2">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="font-medium">{profile.name}</span>
+                                                    <Badge variant="outline" className="text-xs">{profile.slug}</Badge>
+                                                </div>
+                                                <p className="text-sm text-muted-foreground">{profile.description}</p>
+                                                {profile.responsibility_scope && <p className="text-xs text-muted-foreground">{profile.responsibility_scope}</p>}
+                                                {profile.preferred_tools && profile.preferred_tools.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {profile.preferred_tools.map((tool) => (
+                                                            <span key={tool} className="rounded-md bg-muted px-2 py-1 text-xs">{tool}</span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {profile.escalation_rules && (
+                                                    <p className="text-xs text-muted-foreground">Escalation: {profile.escalation_rules}</p>
+                                                )}
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                ))
                             )}
                         </div>
                     </div>

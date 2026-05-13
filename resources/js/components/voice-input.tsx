@@ -14,11 +14,40 @@ interface VoiceInputProps {
 
 type VoiceState = 'idle' | 'listening' | 'processing';
 
-// Extend window for browser SpeechRecognition
+type SpeechRecognitionResultLike = {
+    isFinal: boolean;
+    0: {
+        transcript: string;
+    };
+};
+
+type SpeechRecognitionEventLike = {
+    resultIndex: number;
+    results: {
+        length: number;
+        [index: number]: SpeechRecognitionResultLike;
+    };
+};
+
+type SpeechRecognitionLike = {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    onstart: (() => void) | null;
+    onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+    onerror: (() => void) | null;
+    onend: (() => void) | null;
+    start: () => void;
+    stop: () => void;
+    abort: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 declare global {
     interface Window {
-        SpeechRecognition: typeof SpeechRecognition;
-        webkitSpeechRecognition: typeof SpeechRecognition;
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
     }
 }
 
@@ -29,7 +58,7 @@ export function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
     const [interim, setInterim] = useState('');
     const [supported, setSupported] = useState(true);
 
-    const recognitionRef = useRef<SpeechRecognition | null>(null);
+    const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
     const finalRef = useRef('');
 
     useEffect(() => {
