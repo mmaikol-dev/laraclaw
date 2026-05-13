@@ -26,3 +26,5 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+/.agents/db-skills/send-telegram-message/SKILL.mdstorage/*.json
+storage/*rdl-478707-2c066429878f.json
