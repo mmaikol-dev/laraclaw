@@ -95,14 +95,14 @@ class AgentSettingsSeeder extends Seeder
             ],
             [
                 'key' => 'parallel_tools',
-                'value' => 'false',
+                'value' => 'true',
                 'type' => 'bool',
                 'label' => 'Parallel tools',
                 'description' => 'Allow multiple tool calls to run at the same time. Keep this off for more deliberate step-by-step execution.',
             ],
             [
                 'key' => 'max_iterations',
-                'value' => '24',
+                'value' => '100',
                 'type' => 'int',
                 'label' => 'Max iterations',
                 'description' => 'Maximum number of think-act loops the agent can take before it stops.',
