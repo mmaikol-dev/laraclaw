@@ -27,8 +27,8 @@ class SettingsControllerTest extends TestCase
         $this->assertTrue($payload['data']['enable_planning']);
         $this->assertTrue($payload['data']['enable_affective_state']);
         $this->assertTrue($payload['data']['enable_reflection']);
-        $this->assertFalse($payload['data']['parallel_tools']);
-        $this->assertSame(24, $payload['data']['max_iterations']);
+        $this->assertTrue($payload['data']['parallel_tools']);
+        $this->assertSame(100, $payload['data']['max_iterations']);
         $this->assertSame(18, $payload['data']['summarize_after_messages']);
         $this->assertSame(1, $payload['data']['max_tool_retries']);
         $this->assertSame('0.6', $payload['data']['fear_threshold']);

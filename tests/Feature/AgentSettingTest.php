@@ -20,8 +20,8 @@ class AgentSettingTest extends TestCase
         $this->assertSame('true', $defaults['enable_planning']['value']);
         $this->assertSame('true', $defaults['enable_affective_state']['value']);
         $this->assertSame('true', $defaults['enable_reflection']['value']);
-        $this->assertSame('false', $defaults['parallel_tools']['value']);
-        $this->assertSame('24', $defaults['max_iterations']['value']);
+        $this->assertSame('true', $defaults['parallel_tools']['value']);
+        $this->assertSame('100', $defaults['max_iterations']['value']);
         $this->assertSame('18', $defaults['summarize_after_messages']['value']);
         $this->assertSame('0.7', $defaults['temperature']['value']);
         $this->assertSame('0.6', $defaults['fear_threshold']['value']);
