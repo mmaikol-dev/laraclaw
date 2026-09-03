@@ -1,0 +1,2 @@
+- [Project Overview](project_overview.md) -- tech stack, purpose, architecture summary
+- [Architecture](project_architecture.md) -- key patterns, data flow, component structure

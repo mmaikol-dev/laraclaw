@@ -1,0 +1,51 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx block-no-verify@1.1.2"
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash -c 'input=$(cat); cmd=$(echo \"$input\" | jq -r \".command // empty\" 2>/dev/null); if echo \"$cmd\" | grep -qE \"git\\s+(reset\\s+--hard|clean\\s+-f|push\\s+--force|push\\s+-f|checkout\\s+--\\s+\\.)\" 2>/dev/null; then echo \"BLOCK: Destructive git command detected. Confirm with user first.\" >&2; exit 2; fi'"
+        }
+      ]
+    },
+    {
+      "matcher": "Write",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash -c 'input=$(cat); file=$(echo \"$input\" | jq -r \".file_path // empty\" 2>/dev/null); if echo \"$file\" | grep -qE \"\\.(env|env\\.local|env\\.production)$\" 2>/dev/null; then echo \"BLOCK: Writing directly to env file. Use .env.example instead.\" >&2; exit 2; fi'"
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Edit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash -c 'input=$(cat); file=$(echo \"$input\" | jq -r \".file_path // empty\" 2>/dev/null); if [ -n \"$file\" ] && echo \"$file\" | grep -qE \"\\.(ts|tsx|js|jsx)$\"; then logs=$(grep -c \"console\\.log\" \"$file\" 2>/dev/null || echo 0); anys=$(grep -cE \": any[^a-zA-Z]|<any>|as any\" \"$file\" 2>/dev/null || echo 0); warns=\"\"; [ \"$logs\" -gt 0 ] && warns=\"${warns}[WARN] $logs console.log(s). \"; [ \"$anys\" -gt 0 ] && warns=\"${warns}[WARN] $anys any type(s) -- use proper types. \"; [ -n \"$warns\" ] && echo \"$warns\" >&2; fi'"
+        }
+      ]
+    },
+    {
+      "matcher": "Write",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash -c 'input=$(cat); file=$(echo \"$input\" | jq -r \".file_path // empty\" 2>/dev/null); if [ -n \"$file\" ] && echo \"$file\" | grep -qE \"\\.(ts|tsx|js|jsx)$\"; then logs=$(grep -c \"console\\.log\" \"$file\" 2>/dev/null || echo 0); anys=$(grep -cE \": any[^a-zA-Z]|<any>|as any\" \"$file\" 2>/dev/null || echo 0); secrets=$(grep -cE \"(sk-|sk_live|PRIVATE_KEY|password\\s*=)\" \"$file\" 2>/dev/null || echo 0); warns=\"\"; [ \"$logs\" -gt 0 ] && warns=\"${warns}[WARN] $logs console.log(s). \"; [ \"$anys\" -gt 0 ] && warns=\"${warns}[WARN] $anys any type(s). \"; [ \"$secrets\" -gt 0 ] && warns=\"${warns}[CRITICAL] Possible secrets/keys detected! \"; [ -n \"$warns\" ] && echo \"$warns\" >&2; fi'"
+        }
+      ]
+    }
+  ]
+}
