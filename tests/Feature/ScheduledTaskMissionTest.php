@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Jobs\AdvanceMissionJob;
 use App\Jobs\RunScheduledTaskJob;
 use App\Models\AgentReport;
+use App\Models\Conversation;
+use App\Models\Message;
 use App\Models\Mission;
 use App\Models\ScheduledTask;
 use App\Services\Agent\AgentService;
@@ -197,9 +199,9 @@ class ScheduledTaskMissionTest extends TestCase
         /** @var MockInterface&AgentService $agent */
         $agent = $this->mock(AgentService::class);
         $agent->shouldReceive('run')->once()->andReturnUsing(function () use ($task) {
-            $conversation = \App\Models\Conversation::create(['title' => "Scheduled: {$task->name}"]);
+            $conversation = Conversation::create(['title' => "Scheduled: {$task->name}"]);
 
-            return \App\Models\Message::factory()->create([
+            return Message::factory()->create([
                 'conversation_id' => $conversation->id,
                 'role' => 'assistant',
                 'content' => 'Hello from the scheduled run.',

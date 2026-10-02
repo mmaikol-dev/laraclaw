@@ -6,12 +6,16 @@ use App\Events\AgentChunkStreamed;
 use App\Events\AgentFinished;
 use App\Events\AgentShellChunkStreamed;
 use App\Events\AgentToolCalled;
+use App\Events\ToolExecutionCompleted;
+use App\Events\ToolExecutionFailed;
+use App\Events\ToolExecutionStarted;
 use App\Models\AgentMemory;
 use App\Models\AgentSetting;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\MetricSnapshot;
 use App\Models\Skill;
+use App\Models\Task;
 use App\Models\TaskLog;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Concurrency;
@@ -319,6 +323,25 @@ class AgentService
     }
 
     /**
+     * Perform a one-shot non-streaming chat call (e.g. for planning/verification)
+     * without persisting anything or running the full agent loop.
+     *
+     * @param  array<int, array<string, mixed>>  $history
+     */
+    public function chatRaw(array $history, ?string $model = null, ?float $temperature = null): string
+    {
+        $model ??= $this->ollama->agentModel;
+        $temperature ??= (float) AgentSetting::get('temperature', '0.7');
+
+        $response = $this->ollama->chat($history, [], [
+            'model' => $model,
+            'temperature' => $temperature,
+        ]);
+
+        return trim((string) data_get($response, 'message.content', ''));
+    }
+
+    /**
      * @param  array<string, int|float>  $stats
      */
     private function shouldRecoverEmptyResponse(string $thinkingContent, array $stats): bool
@@ -581,6 +604,8 @@ class AgentService
                 'input' => $arguments,
                 'status' => 'running',
             ]]);
+
+            $this->dispatchToolExecutionStarted($conversation, $toolName, (string) $taskLog->id);
         }
 
         if ($executableToolCalls === []) {
@@ -622,6 +647,16 @@ class AgentService
 
             $toolOutput = $result['error'] !== null ? 'Error: '.$result['error'] : $result['output'];
             $status = $result['error'] === null ? 'success' : 'error';
+
+            $this->dispatchToolExecutionResult(
+                $conversation,
+                $toolName,
+                (string) $taskLog->id,
+                $result['error'] === null,
+                $result['output'],
+                $result['error'],
+                (int) $result['duration_ms'],
+            );
 
             if ($result['error'] === null) {
                 $taskLog->markSuccess($toolOutput, (int) $result['duration_ms']);
@@ -696,6 +731,9 @@ class AgentService
             'status' => 'pending',
         ]);
         $taskLog->markRunning();
+        $toolCallId = (string) $taskLog->id;
+
+        $this->dispatchToolExecutionStarted($conversation, $toolName, $toolCallId);
 
         event(new AgentToolCalled($channelName, [
             'id' => $taskLog->id,
@@ -724,6 +762,8 @@ class AgentService
         $result = $this->executeWithRetryAndCache($toolName, $arguments, $onOutput);
         $toolOutput = $result['error'] !== null ? 'Error: '.$result['error'] : $result['output'];
         $status = $result['error'] === null ? 'success' : 'error';
+
+        $this->dispatchToolExecutionResult($conversation, $toolName, $toolCallId, $result['error'] === null, $result['output'], $result['error'], (int) $result['duration_ms']);
 
         if ($result['error'] === null) {
             $taskLog->markSuccess($toolOutput, (int) $result['duration_ms']);
@@ -772,6 +812,48 @@ class AgentService
             'tool_name' => $toolName,
             'tool_result' => ['error' => $result['error'], 'duration_ms' => $result['duration_ms']],
         ]);
+    }
+
+    /**
+     * Dispatch ToolExecutionStarted when a tool begins in the context of a task.
+     */
+    private function dispatchToolExecutionStarted(Conversation $conversation, string $toolName, string $toolCallId): void
+    {
+        $task = $this->taskForConversation($conversation);
+
+        if ($task === null) {
+            return;
+        }
+
+        event(new ToolExecutionStarted($task, $toolName, $toolCallId));
+    }
+
+    /**
+     * Dispatch ToolExecutionCompleted / ToolExecutionFailed after a tool finishes
+     * in the context of a task.
+     */
+    private function dispatchToolExecutionResult(Conversation $conversation, string $toolName, string $toolCallId, bool $success, ?string $output, ?string $error, int $durationMs): void
+    {
+        $task = $this->taskForConversation($conversation);
+
+        if ($task === null) {
+            return;
+        }
+
+        if ($success) {
+            event(new ToolExecutionCompleted($task, $toolName, $toolCallId, (string) $output, $durationMs));
+        } else {
+            event(new ToolExecutionFailed($task, $toolName, $toolCallId, (string) $error));
+        }
+    }
+
+    /**
+     * Resolve the task that owns a conversation, if any. Tool-execution events
+     * only fire when the agent runs in the context of a task-engine task.
+     */
+    private function taskForConversation(Conversation $conversation): ?Task
+    {
+        return Task::query()->where('conversation_id', $conversation->id)->latest('id')->first();
     }
 
     /**

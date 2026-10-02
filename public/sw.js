@@ -1,81 +1,63 @@
-const CACHE_NAME = 'laraclaw-v2';
-const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'];
+/**
+ * LaraClaw offline shell.
+ *
+ * Only immutable, content-hashed build assets are ever cached. Navigations,
+ * Inertia page requests and API calls are deliberately left alone: they carry
+ * per-user session data, so serving them from a shared cache leaks one user's
+ * pages to another and pins stale payloads in place of live ones.
+ */
+const CACHE_NAME = 'laraclaw-v3';
+const PRECACHE = ['/manifest.webmanifest', '/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'];
+
+const isCacheableAsset = (url) =>
+    url.pathname.startsWith('/build/assets/') ||
+    url.pathname.startsWith('/fonts/');
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)),
+        caches
+            .open(CACHE_NAME)
+            .then((cache) => cache.addAll(PRECACHE))
+            .then(() => self.skipWaiting()),
     );
-    self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((keys) =>
-            Promise.all(
-                keys.map((key) => {
-                    if (key !== CACHE_NAME) {
-                        return caches.delete(key);
-                    }
-
-                    return Promise.resolve(false);
-                }),
-            ),
-        ),
+            Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
+        ).then(() => self.clients.claim()),
     );
-    self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
-    if (event.request.method !== 'GET') {
+    const request = event.request;
+
+    if (request.method !== 'GET') {
         return;
     }
 
-    const requestUrl = new URL(event.request.url);
+    const url = new URL(request.url);
 
-    if (requestUrl.origin !== self.location.origin) {
-        return;
-    }
-
-    // Never cache API requests — always fetch fresh from the network
-    if (requestUrl.pathname.startsWith('/api/')) {
-        return;
-    }
-
-    if (event.request.mode === 'navigate') {
-        event.respondWith(
-            fetch(event.request)
-                .then((response) => {
-                    const copy = response.clone();
-                    void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-
-                    return response;
-                })
-                .catch(async () => {
-                    const cached = await caches.match(event.request);
-
-                    return cached || caches.match('/');
-                }),
-        );
-
+    if (url.origin !== self.location.origin || !isCacheableAsset(url)) {
         return;
     }
 
     event.respondWith(
-        caches.match(event.request).then((cached) => {
+        caches.open(CACHE_NAME).then(async (cache) => {
+            const cached = await cache.match(request);
+
             if (cached) {
                 return cached;
             }
 
-            return fetch(event.request).then((response) => {
-                if (! response || response.status !== 200 || response.type !== 'basic') {
-                    return response;
-                }
+            const response = await fetch(request);
 
-                const copy = response.clone();
-                void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            if (response.ok && response.type === 'basic') {
+                await cache.put(request, response.clone());
+            }
 
-                return response;
-            });
+            return response;
         }),
     );
 });

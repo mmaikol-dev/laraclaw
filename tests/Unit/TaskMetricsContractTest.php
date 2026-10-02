@@ -11,7 +11,7 @@ class TaskMetricsContractTest extends TestCase
 {
     public function test_task_controller_exposes_expected_methods(): void
     {
-        $controller = new TaskController();
+        $controller = new TaskController;
 
         $this->assertTrue(method_exists($controller, 'index'));
         $this->assertTrue(method_exists($controller, 'show'));

@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class Event extends Model
@@ -15,6 +15,11 @@ class Event extends Model
     public $incrementing = false;
 
     protected $keyType = 'string';
+
+    /**
+     * The events table only keeps a created_at timestamp.
+     */
+    public const UPDATED_AT = null;
 
     /**
      * The attributes that are mass assignable.
@@ -79,7 +84,7 @@ class Event extends Model
     /**
      * Scope to filter by event type.
      */
-    public function scopeEventType($query, string $type): $query
+    public function scopeEventType(Builder $query, string $type): Builder
     {
         return $query->where('event_type', $type);
     }
@@ -87,7 +92,7 @@ class Event extends Model
     /**
      * Scope to filter by entity type.
      */
-    public function scopeEntityType($query, string $type): $query
+    public function scopeEntityType(Builder $query, string $type): Builder
     {
         return $query->where('entity_type', $type);
     }
@@ -95,7 +100,7 @@ class Event extends Model
     /**
      * Scope to filter by level.
      */
-    public function scopeLevel($query, string $level): $query
+    public function scopeLevel(Builder $query, string $level): Builder
     {
         return $query->where('level', $level);
     }

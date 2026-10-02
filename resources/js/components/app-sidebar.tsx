@@ -13,6 +13,7 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
+import { index as agentTasks } from '@/routes/agent-tasks';
 import { dashboard } from '@/routes';
 import { edit as editAgentSettings } from '@/routes/agent-settings';
 import { index as chat } from '@/routes/chat';
@@ -44,6 +45,11 @@ const mainNavItems: NavItem[] = [
         title: 'Tasks',
         href: tasks(),
         icon: ListChecks,
+    },
+    {
+        title: 'Agent Tasks',
+        href: agentTasks(),
+        icon: BotMessageSquare,
     },
     {
         title: 'Tools',

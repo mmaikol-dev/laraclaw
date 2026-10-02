@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SkillController;
 use App\Http\Controllers\Api\SkillScriptController;
 use App\Http\Controllers\Api\TaskController;
+use App\Http\Controllers\Api\TaskEngineController;
 use App\Http\Controllers\Api\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -34,6 +35,21 @@ Route::prefix('v1')->group(function () {
     Route::get('tasks', [TaskController::class, 'index'])->name('api.tasks.index');
     Route::get('tasks/stats', [TaskController::class, 'stats'])->name('api.tasks.stats');
     Route::get('tasks/{task}', [TaskController::class, 'show'])->name('api.tasks.show');
+
+    // Task engine (durable, long-running task execution)
+    Route::get('engine/tasks', [TaskEngineController::class, 'index'])->name('api.engine.tasks.index');
+    Route::post('engine/tasks', [TaskEngineController::class, 'store'])->name('api.engine.tasks.store');
+    Route::get('engine/tasks/{task}', [TaskEngineController::class, 'show'])->name('api.engine.tasks.show');
+    Route::post('engine/tasks/{task}/execute', [TaskEngineController::class, 'execute'])->name('api.engine.tasks.execute');
+    Route::post('engine/tasks/{task}/pause', [TaskEngineController::class, 'pause'])->name('api.engine.tasks.pause');
+    Route::post('engine/tasks/{task}/wait', [TaskEngineController::class, 'wait'])->name('api.engine.tasks.wait');
+    Route::post('engine/tasks/{task}/cancel', [TaskEngineController::class, 'cancel'])->name('api.engine.tasks.cancel');
+    Route::post('engine/tasks/{task}/resume', [TaskEngineController::class, 'resume'])->name('api.engine.tasks.resume');
+    Route::post('engine/tasks/{task}/recover', [TaskEngineController::class, 'recover'])->name('api.engine.tasks.recover');
+    Route::post('engine/tasks/{task}/replan', [TaskEngineController::class, 'replan'])->name('api.engine.tasks.replan');
+    Route::post('engine/tasks/{task}/steps/{step}/restart', [TaskEngineController::class, 'restartStep'])->name('api.engine.tasks.steps.restart');
+    Route::delete('engine/tasks/{task}', [TaskEngineController::class, 'destroy'])->name('api.engine.tasks.destroy');
+    Route::post('engine/supervise', [TaskEngineController::class, 'supervise'])->name('api.engine.supervise');
     Route::get('skills', [SkillController::class, 'index'])->name('api.skills.index');
     Route::post('skills', [SkillController::class, 'store'])->name('api.skills.store');
     Route::put('skills/{skill}', [SkillController::class, 'update'])->name('api.skills.update');

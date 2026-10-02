@@ -10,7 +10,7 @@ class ToolRegistryTest extends TestCase
 {
     public function test_tool_registry_formats_enabled_tools_for_ollama(): void
     {
-        $registry = new ToolRegistry();
+        $registry = new ToolRegistry;
         $registry->register(new class extends BaseTool
         {
             public function getName(): string
@@ -48,7 +48,7 @@ class ToolRegistryTest extends TestCase
 
     public function test_tool_registry_returns_error_for_unknown_tools(): void
     {
-        $registry = new ToolRegistry();
+        $registry = new ToolRegistry;
 
         $result = $registry->execute('missing', []);
 

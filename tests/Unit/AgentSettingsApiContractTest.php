@@ -10,7 +10,7 @@ class AgentSettingsApiContractTest extends TestCase
 {
     public function test_update_agent_settings_request_has_expected_shape(): void
     {
-        $request = new UpdateAgentSettingsRequest();
+        $request = new UpdateAgentSettingsRequest;
 
         $this->assertArrayHasKey('settings', $request->rules());
         $this->assertSame(['required', 'array'], $request->rules()['settings']);
@@ -20,7 +20,7 @@ class AgentSettingsApiContractTest extends TestCase
 
     public function test_settings_controller_exposes_expected_methods(): void
     {
-        $controller = new SettingsController();
+        $controller = new SettingsController;
 
         $this->assertTrue(method_exists($controller, 'index'));
         $this->assertTrue(method_exists($controller, 'update'));

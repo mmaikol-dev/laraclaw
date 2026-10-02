@@ -16,19 +16,19 @@ class FileApiContractTest extends TestCase
 {
     public function test_file_requests_are_authorized_and_define_expected_rules(): void
     {
-        $this->assertTrue((new FileBrowseRequest())->authorize());
-        $this->assertSame(['path' => ['nullable', 'string', 'max:1000']], (new FileBrowseRequest())->rules());
-        $this->assertSame(['path' => ['required', 'string', 'max:1000']], (new FileReadRequest())->rules());
-        $this->assertArrayHasKey('content', (new FileWriteRequest())->rules());
-        $this->assertArrayHasKey('destination', (new FileMoveRequest())->rules());
-        $this->assertArrayHasKey('path', (new FileDeleteRequest())->rules());
-        $this->assertArrayHasKey('path', (new FileCreateRequest())->rules());
-        $this->assertArrayHasKey('path', (new FileDirectoryRequest())->rules());
+        $this->assertTrue((new FileBrowseRequest)->authorize());
+        $this->assertSame(['path' => ['nullable', 'string', 'max:1000']], (new FileBrowseRequest)->rules());
+        $this->assertSame(['path' => ['required', 'string', 'max:1000']], (new FileReadRequest)->rules());
+        $this->assertArrayHasKey('content', (new FileWriteRequest)->rules());
+        $this->assertArrayHasKey('destination', (new FileMoveRequest)->rules());
+        $this->assertArrayHasKey('path', (new FileDeleteRequest)->rules());
+        $this->assertArrayHasKey('path', (new FileCreateRequest)->rules());
+        $this->assertArrayHasKey('path', (new FileDirectoryRequest)->rules());
     }
 
     public function test_file_controller_exposes_expected_methods(): void
     {
-        $controller = new FileController();
+        $controller = new FileController;
 
         $this->assertTrue(method_exists($controller, 'browse'));
         $this->assertTrue(method_exists($controller, 'read'));

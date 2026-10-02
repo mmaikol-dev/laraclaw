@@ -177,7 +177,7 @@ class MissionTool extends BaseTool
         $handoffs = $mission->handoffs()->take(3)->get();
         $handoffLines = $handoffs->isEmpty()
             ? ''
-            : "\n\nRecent handoffs:\n".$handoffs->map(fn (\App\Models\MissionHandoff $h) => sprintf(
+            : "\n\nRecent handoffs:\n".$handoffs->map(fn (MissionHandoff $h) => sprintf(
                 '  (%s) %s',
                 $h->role,
                 str_replace("\n", ' ', $h->summary),

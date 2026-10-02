@@ -4,6 +4,7 @@ use App\Jobs\CheckTriggersJob;
 use App\Jobs\GenerateDailyReportJob;
 use App\Jobs\RefreshProactiveFindingsJob;
 use App\Jobs\RunScheduledTaskJob;
+use App\Jobs\SuperviseTasks;
 use App\Models\ScheduledTask;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -27,6 +28,9 @@ Schedule::job(CheckTriggersJob::class)->everyFiveMinutes()->name('check-triggers
 
 // Refresh operational findings in the background
 Schedule::job(RefreshProactiveFindingsJob::class)->everyFifteenMinutes()->name('refresh-proactive-findings')->withoutOverlapping();
+
+// Supervisor / watchdog: detect and recover stale, stuck, or looping tasks
+Schedule::job(SuperviseTasks::class)->everyMinute()->name('supervise-tasks')->withoutOverlapping();
 
 // Generate daily report at 11:55pm every day
 Schedule::job(GenerateDailyReportJob::class)->dailyAt('23:55')->name('daily-report')->withoutOverlapping();

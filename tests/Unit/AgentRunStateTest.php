@@ -11,7 +11,7 @@ class AgentRunStateTest extends TestCase
 {
     public function test_it_tracks_the_live_run_state_for_a_conversation(): void
     {
-        $state = new AgentRunState(new Repository(new ArrayStore()));
+        $state = new AgentRunState(new Repository(new ArrayStore));
 
         $state->begin(7);
         $state->markThinking(7);
@@ -36,7 +36,7 @@ class AgentRunStateTest extends TestCase
 
     public function test_it_clears_a_prior_cancellation_when_a_new_run_begins(): void
     {
-        $state = new AgentRunState(new Repository(new ArrayStore()));
+        $state = new AgentRunState(new Repository(new ArrayStore));
 
         $state->cancel(3);
         $this->assertTrue($state->isCancelled(3));

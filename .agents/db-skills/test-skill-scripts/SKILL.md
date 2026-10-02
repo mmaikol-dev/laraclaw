@@ -1,12 +1,12 @@
 ---
 name: test-skill-scripts
-description: Eligendi deserunt quis molestias occaecati.
-category: research
-created_by: user
+description: Est et dolore illo culpa cupiditate dolores repellat.
+category: writing
+created_by: agent
 version: 1
 is_active: true
 source: database
 dependencies: []
 ---
 
-Facilis quod nostrum error doloribus eos. Ipsa doloremque occaecati quae fuga.
+Eos voluptatem veritatis fugit exercitationem dolor in et non. Et qui dolore maxime. Ut ex illo et vitae et dolore qui.

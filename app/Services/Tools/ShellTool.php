@@ -167,6 +167,7 @@ class ShellTool extends BaseTool implements StreamsOutput
         }
 
         $this->guardCommand($command);
+        $this->validateCommandSyntax($command);
 
         $isOpencodeCommand = self::isOpenCodeCommand($command);
         $timeout = self::resolveTimeout($command, isset($arguments['timeout']) ? (int) $arguments['timeout'] : null);
@@ -277,5 +278,69 @@ class ShellTool extends BaseTool implements StreamsOutput
                 throw new RuntimeException("Blocked shell pattern detected: {$pattern}");
             }
         }
+    }
+
+    /**
+     * Catch common malformed commands before they reach bash, so a weak model's
+     * quoting mistakes produce a clear, recoverable error instead of a confusing
+     * "unexpected EOF while looking for matching quote" failure that derails a run.
+     */
+    private function validateCommandSyntax(string $command): void
+    {
+        if ($this->hasUnbalancedQuotes($command)) {
+            throw new RuntimeException(
+                'Invalid shell command: quotes are unbalanced. '.$command
+                .' Please rewrite the command with balanced quotes and retry.'
+            );
+        }
+    }
+
+    /**
+     * Detect unbalanced quotes using bash-like context so that a quote acting
+     * as a literal character (e.g. `'` inside `"..."`, a backslash-escaped quote,
+     * or `''` concatenation) is not mistaken for a delimiter.
+     */
+    private function hasUnbalancedQuotes(string $command): bool
+    {
+        $state = null; // null | '\'' | '"' | '`'
+        $len = strlen($command);
+
+        for ($i = 0; $i < $len; $i++) {
+            $char = $command[$i];
+
+            if ($state === "'") {
+                if ($char === "'") {
+                    $state = null;
+                }
+
+                continue;
+            }
+
+            if ($state === '"' || $state === '`') {
+                if ($char === '\\') {
+                    $i++;
+
+                    continue;
+                }
+
+                if ($char === $state) {
+                    $state = null;
+                }
+
+                continue;
+            }
+
+            if ($char === '\\') {
+                $i++;
+
+                continue;
+            }
+
+            if ($char === "'" || $char === '"' || $char === '`') {
+                $state = $char;
+            }
+        }
+
+        return $state !== null;
     }
 }

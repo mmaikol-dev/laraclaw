@@ -1,12 +1,21 @@
 import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
-import { Component, type ErrorInfo, type ReactNode, StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { Component,   StrictMode } from 'react';
+import type {ErrorInfo, ReactNode} from 'react';
+import { createRoot  } from 'react-dom/client';
+import type {Root} from 'react-dom/client';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import '../css/app.css';
 import { initializeTheme } from '@/hooks/use-appearance';
 
-class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+interface ReactMountableElement extends HTMLElement {
+    _x_react_root?: Root;
+}
+
+class AppErrorBoundary extends Component<
+    { children: ReactNode },
+    { error: Error | null }
+> {
     constructor(props: { children: ReactNode }) {
         super(props);
         this.state = { error: null };
@@ -24,8 +33,12 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error
         if (this.state.error !== null) {
             return (
                 <div style={{ padding: '2rem', fontFamily: 'monospace' }}>
-                    <h2 style={{ marginBottom: '0.5rem' }}>Something went wrong</h2>
-                    <p style={{ color: '#888', marginBottom: '1rem' }}>{this.state.error.message}</p>
+                    <h2 style={{ marginBottom: '0.5rem' }}>
+                        Something went wrong
+                    </h2>
+                    <p style={{ color: '#888', marginBottom: '1rem' }}>
+                        {this.state.error.message}
+                    </p>
                     <button
                         onClick={() => window.location.reload()}
                         style={{ padding: '0.5rem 1rem', cursor: 'pointer' }}
@@ -44,9 +57,14 @@ const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
-            console.error('[LaraClaw] Service worker registration failed:', error);
-        });
+        void navigator.serviceWorker
+            .register('/sw.js')
+            .catch((error: unknown) => {
+                console.error(
+                    '[LaraClaw] Service worker registration failed:',
+                    error,
+                );
+            });
     });
 }
 
@@ -58,9 +76,16 @@ createInertiaApp({
             import.meta.glob('./pages/**/*.tsx'),
         ),
     setup({ el, App, props }) {
-        const root = createRoot(el);
+        // React 19 disallows calling createRoot() twice on the same container.
+        // Inertia re-invokes setup() on every navigation, so cache the root on
+        // the element and reuse it instead of re-creating it.
+        const mountPoint = el as ReactMountableElement;
 
-        root.render(
+        if (!mountPoint._x_react_root) {
+            mountPoint._x_react_root = createRoot(mountPoint);
+        }
+
+        mountPoint._x_react_root.render(
             <StrictMode>
                 <AppErrorBoundary>
                     <TooltipProvider delayDuration={0}>

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Services\Agent\ToolRegistry;
 use App\Services\Tools\ShellTool;
 use RuntimeException;
 use Tests\TestCase;
@@ -89,7 +90,7 @@ class ShellToolStreamingTest extends TestCase
         $tool = new ShellTool;
         $received = [];
 
-        $result = app(\App\Services\Agent\ToolRegistry::class)->execute('shell', [
+        $result = app(ToolRegistry::class)->execute('shell', [
             'command' => 'echo streamed-line',
         ], function (string $chunk) use (&$received): void {
             $received[] = $chunk;

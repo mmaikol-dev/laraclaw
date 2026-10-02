@@ -14,4 +14,26 @@ return [
     'enable_shell' => filter_var(env('AGENT_ENABLE_SHELL', true), FILTER_VALIDATE_BOOLEAN),
     'enable_web' => filter_var(env('AGENT_ENABLE_WEB', true), FILTER_VALIDATE_BOOLEAN),
     'temperature' => '0.7',
+
+    // Model routing for the task engine.
+    'models' => [
+        'simple' => env('SIMPLE_TASK_MODEL', env('OLLAMA_AGENT_MODEL', 'glm-5:cloud')),
+        'coding' => env('CODING_TASK_MODEL', env('OLLAMA_AGENT_MODEL', 'glm-5:cloud')),
+        'reasoning' => env('REASONING_TASK_MODEL', env('OLLAMA_AGENT_MODEL', 'glm-5:cloud')),
+        'review' => env('REVIEW_TASK_MODEL', env('OLLAMA_AGENT_MODEL', 'glm-5:cloud')),
+        'complex' => env('COMPLEX_TASK_MODEL', env('OLLAMA_AGENT_MODEL', 'glm-5:cloud')),
+    ],
+
+    // Task engine tuning.
+    'task' => [
+        'queue' => (string) env('AGENT_TASK_QUEUE', 'tasks'),
+        'heartbeat_interval_seconds' => (int) env('AGENT_TASK_HEARTBEAT_SECONDS', 90),
+        'stale_grace_seconds' => (int) env('AGENT_TASK_STALE_GRACE', 120),
+        'max_attempts' => (int) env('AGENT_TASK_MAX_ATTEMPTS', 5),
+        'max_step_attempts' => (int) env('AGENT_TASK_MAX_STEP_ATTEMPTS', 3),
+        'loop_threshold' => (int) env('AGENT_TASK_LOOP_THRESHOLD', 4),
+        'max_execution_minutes' => (int) env('AGENT_TASK_MAX_EXECUTION_MINUTES', 60),
+        'verification_required' => filter_var(env('AGENT_TASK_VERIFICATION_REQUIRED', true), FILTER_VALIDATE_BOOLEAN),
+        'planning_enabled' => filter_var(env('AGENT_TASK_PLANNING_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+    ],
 ];

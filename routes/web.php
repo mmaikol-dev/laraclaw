@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AgentTasksController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\MissionController;
@@ -18,6 +19,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('chat/{conversation}', [ChatController::class, 'show'])->name('chat.show');
     Route::inertia('files', 'files/index')->name('files.index');
     Route::inertia('tasks', 'tasks/index')->name('tasks.index');
+    Route::get('agent-tasks', [AgentTasksController::class, 'index'])->name('agent-tasks.index');
+    Route::get('agent-tasks/{task}', [AgentTasksController::class, 'show'])->name('agent-tasks.show');
     Route::get('tools', [ToolController::class, 'index'])->name('tools.index');
     Route::get('skills', [SkillController::class, 'index'])->name('skills.index');
     Route::get('missions', [MissionController::class, 'index'])->name('missions.index');

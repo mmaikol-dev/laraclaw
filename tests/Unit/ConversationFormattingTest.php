@@ -29,7 +29,7 @@ class ConversationFormattingTest extends TestCase
 
     public function test_conversation_filters_system_messages_from_ollama_history(): void
     {
-        $conversation = new Conversation();
+        $conversation = new Conversation;
         $conversation->setRelation('messages', collect([
             new Message(['role' => 'system', 'content' => 'hidden']),
             new Message(['role' => 'user', 'content' => 'Hello']),

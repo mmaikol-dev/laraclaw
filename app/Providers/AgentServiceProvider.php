@@ -17,6 +17,14 @@ use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
 use App\Services\Embedding\EmbeddingService;
 use App\Services\Embedding\VectorStore;
+use App\Services\TaskEngine\FailureClassifier;
+use App\Services\TaskEngine\LoopDetector;
+use App\Services\TaskEngine\ModelRouter;
+use App\Services\TaskEngine\SpecialistAgents;
+use App\Services\TaskEngine\TaskContext;
+use App\Services\TaskEngine\TaskEngine;
+use App\Services\TaskEngine\TaskSupervisor;
+use App\Services\TaskEngine\VerificationService;
 use App\Services\Tools\BrowserTool;
 use App\Services\Tools\DocumentTool;
 use App\Services\Tools\FileTool;
@@ -28,6 +36,7 @@ use App\Services\Tools\ProjectTool;
 use App\Services\Tools\ScheduledTaskTool;
 use App\Services\Tools\ShellTool;
 use App\Services\Tools\SkillTool;
+use App\Services\Tools\TaskEngineTool;
 use App\Services\Tools\TriggerTool;
 use App\Services\Tools\WebTool;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
@@ -82,6 +91,7 @@ class AgentServiceProvider extends ServiceProvider
             $registry->register(new TriggerTool);
             $registry->register(new OpenCodeTool($app->make(OpenCodeService::class)));
             $registry->register(new MissionTool($app->make(MissionService::class)));
+            $registry->register(new TaskEngineTool($app));
 
             return $registry;
         });
@@ -98,6 +108,27 @@ class AgentServiceProvider extends ServiceProvider
                 $app->make(AgentIdentityService::class),
             ),
         );
+
+        // Task engine services
+        $this->app->singleton(ModelRouter::class);
+        $this->app->singleton(FailureClassifier::class);
+        $this->app->singleton(LoopDetector::class);
+        $this->app->singleton(VerificationService::class);
+        $this->app->singleton(SpecialistAgents::class, fn (): SpecialistAgents => new SpecialistAgents);
+        $this->app->singleton(TaskContext::class, fn (): TaskContext => new TaskContext);
+        $this->app->singleton(TaskEngine::class, fn ($app): TaskEngine => new TaskEngine(
+            $app->make(ToolRegistry::class),
+            $app->make(ModelRouter::class),
+            $app->make(FailureClassifier::class),
+            $app->make(LoopDetector::class),
+            $app->make(VerificationService::class),
+            $app->make(AgentService::class),
+            $app->make(SpecialistAgents::class),
+            $app->make(TaskContext::class),
+        ));
+        $this->app->singleton(TaskSupervisor::class, fn ($app): TaskSupervisor => new TaskSupervisor(
+            $app->make(TaskEngine::class),
+        ));
     }
 
     /**
