@@ -1,6 +1,6 @@
 ---
 name: test-skill-scripts
-description: Est et dolore illo culpa cupiditate dolores repellat.
+description: Nesciunt ratione aliquid molestiae deleniti et rem.
 category: writing
 created_by: agent
 version: 1
@@ -9,4 +9,4 @@ source: database
 dependencies: []
 ---
 
-Eos voluptatem veritatis fugit exercitationem dolor in et non. Et qui dolore maxime. Ut ex illo et vitae et dolore qui.
+Voluptas eaque odit necessitatibus quaerat. Aut ea neque odit hic expedita et ipsa aut. Ratione voluptatem repellendus commodi dicta totam ut.

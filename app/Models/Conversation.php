@@ -42,6 +42,22 @@ class Conversation extends Model
         ];
     }
 
+    /**
+     * Every automated surface (task engine, missions, projects, scheduled tasks,
+     * triggers, webhooks, reports) creates conversations without naming a model.
+     * Resolving it here keeps a single, config-driven source of truth instead of
+     * letting the conversations.model column default decide — that default was a
+     * retired cloud model, which made every autonomous feature fail with HTTP 410.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $conversation): void {
+            if (trim((string) $conversation->model) === '') {
+                $conversation->model = (string) config('ollama.agent_model');
+            }
+        });
+    }
+
     public function roleProfile(): BelongsTo
     {
         return $this->belongsTo(AgentRoleProfile::class, 'role_profile_id');

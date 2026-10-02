@@ -418,7 +418,13 @@ class TaskEngine
         $conversation = $task->conversation;
 
         if ($conversation === null) {
-            $conversation = Conversation::create(['title' => 'Task: '.str()->limit($task->goal, 60)]);
+            $conversation = Conversation::create([
+                'title' => 'Task: '.str()->limit($task->goal, 60),
+                // Propagate the routed model. Without this the conversation falls
+                // back to the conversations.model column default, which silently
+                // bypasses the complexity router and escalation for every step.
+                'model' => $task->model ?: $this->router->modelForTask($task),
+            ]);
             $task->update(['conversation_id' => $conversation->id]);
         }
 

@@ -8,6 +8,11 @@ use RuntimeException;
 
 class OllamaService
 {
+    /**
+     * Bytes of the raw response body retained purely for error reporting.
+     */
+    private const DIAGNOSTIC_BODY_LIMIT = 2000;
+
     private string $host;
 
     /**
@@ -104,6 +109,7 @@ class OllamaService
 
         $buffer = '';
         $pendingEvents = [];
+        $diagnosticBody = '';
 
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
@@ -111,7 +117,11 @@ class OllamaService
             CURLOPT_HTTPHEADER => $this->curlHeaders(),
             CURLOPT_POSTFIELDS => json_encode($payload, JSON_THROW_ON_ERROR),
             CURLOPT_TIMEOUT => $this->timeout,
-            CURLOPT_WRITEFUNCTION => function ($curl, string $chunk) use (&$buffer, &$pendingEvents): int {
+            CURLOPT_WRITEFUNCTION => function ($curl, string $chunk) use (&$buffer, &$pendingEvents, &$diagnosticBody): int {
+                if (strlen($diagnosticBody) < self::DIAGNOSTIC_BODY_LIMIT) {
+                    $diagnosticBody .= substr($chunk, 0, self::DIAGNOSTIC_BODY_LIMIT - strlen($diagnosticBody));
+                }
+
                 $buffer .= $chunk;
 
                 while (($position = strpos($buffer, "\n")) !== false) {
@@ -171,7 +181,7 @@ class OllamaService
         curl_multi_close($mh);
 
         if ($statusCode >= 400) {
-            throw new RuntimeException("Ollama chat stream failed with status {$statusCode}.");
+            throw new RuntimeException("Ollama chat stream failed with status {$statusCode}".$this->describeErrorBody($diagnosticBody));
         }
     }
 
@@ -325,6 +335,28 @@ class OllamaService
                 ? round($completionTokens / ($evalDuration / 1_000_000_000), 2)
                 : 0,
         ];
+    }
+
+    /**
+     * Ollama puts the actionable reason in the response body (for example a
+     * missing-model or auth message), so surface it instead of reporting a
+     * bare status code that cannot be diagnosed.
+     */
+    private function describeErrorBody(string $body): string
+    {
+        if (trim($body) === '') {
+            return '.';
+        }
+
+        $decoded = json_decode($body, true);
+
+        if (is_array($decoded) && isset($decoded['error']) && is_string($decoded['error'])) {
+            return ': '.$decoded['error'];
+        }
+
+        $flattened = trim(preg_replace('/\s+/', ' ', $body) ?? $body);
+
+        return ': '.mb_substr($flattened, 0, 300);
     }
 
     /**
