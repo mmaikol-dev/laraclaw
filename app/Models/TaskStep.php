@@ -18,6 +18,8 @@ class TaskStep extends Model
 
     protected $fillable = [
         'task_id',
+        'role_profile_id',
+        'conversation_id',
         'sort_order',
         'status',
         'description',
@@ -52,6 +54,16 @@ class TaskStep extends Model
     public function task(): BelongsTo
     {
         return $this->belongsTo(Task::class);
+    }
+
+    public function roleProfile(): BelongsTo
+    {
+        return $this->belongsTo(AgentRoleProfile::class);
+    }
+
+    public function conversation(): BelongsTo
+    {
+        return $this->belongsTo(Conversation::class);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Services\Agent;
 
 use App\Models\AgentMemory;
+use App\Models\AgentRoleProfile;
 use App\Models\Conversation;
 use App\Models\TaskLog;
 use Illuminate\Support\Collection;
@@ -10,16 +11,19 @@ use Illuminate\Support\Str;
 
 class AgentIdentityService
 {
+    public function __construct(private readonly OutcomeRecorder $outcomes) {}
+
     /**
      * @return Collection<int, AgentMemory>
      */
-    public function relevantMemories(Conversation $conversation, string $userMessage): Collection
+    public function relevantMemories(Conversation $conversation, string $userMessage, ?AgentRoleProfile $roleProfile = null): Collection
     {
         $keywords = $this->keywords($userMessage);
+        $roleProfileId = ($roleProfile ?? $conversation->roleProfile)?->id;
 
         return AgentMemory::query()
             ->active()
-            ->where(function ($query) use ($conversation, $keywords): void {
+            ->where(function ($query) use ($conversation, $roleProfileId, $keywords): void {
                 $query
                     ->whereIn('scope', ['global', 'environment', 'user'])
                     ->orWhere(function ($subjectQuery) use ($conversation): void {
@@ -28,14 +32,41 @@ class AgentIdentityService
                             ->where('subject_id', $conversation->id);
                     });
 
+                // Experience earned by the employee handling this request, kept
+                // separate from every other employee's.
+                if ($roleProfileId !== null) {
+                    $query->orWhere(function ($roleQuery) use ($roleProfileId): void {
+                        $roleQuery
+                            ->where('scope', 'role')
+                            ->where('subject_type', AgentRoleProfile::class)
+                            ->where('subject_id', $roleProfileId);
+                    });
+                }
+
                 if ($keywords !== []) {
-                    $query->orWhere(function ($keywordQuery) use ($keywords): void {
-                        foreach ($keywords as $keyword) {
-                            $keywordQuery
-                                ->orWhere('key', 'like', "%{$keyword}%")
-                                ->orWhere('value', 'like', "%{$keyword}%")
-                                ->orWhere('category', 'like', "%{$keyword}%");
-                        }
+                    $query->orWhere(function ($keywordQuery) use ($keywords, $roleProfileId): void {
+                        $keywordQuery->where(function ($matches) use ($keywords): void {
+                            foreach ($keywords as $keyword) {
+                                $matches
+                                    ->orWhere('key', 'like', "%{$keyword}%")
+                                    ->orWhere('value', 'like', "%{$keyword}%")
+                                    ->orWhere('category', 'like', "%{$keyword}%");
+                            }
+                        });
+
+                        // Keyword matching must not become a side channel: another
+                        // employee's role memory stays invisible even when the words match.
+                        $keywordQuery->where(function ($scopeQuery) use ($roleProfileId): void {
+                            $scopeQuery->where('scope', '!=', 'role');
+
+                            if ($roleProfileId !== null) {
+                                $scopeQuery->orWhere(function ($ownRoleQuery) use ($roleProfileId): void {
+                                    $ownRoleQuery
+                                        ->where('subject_type', AgentRoleProfile::class)
+                                        ->where('subject_id', $roleProfileId);
+                                });
+                            }
+                        });
                     });
                 }
             })
@@ -65,9 +96,11 @@ class AgentIdentityService
         );
     }
 
-    public function buildPromptContext(Conversation $conversation, string $userMessage): string
+    public function buildPromptContext(Conversation $conversation, string $userMessage, ?AgentRoleProfile $roleProfile = null): string
     {
-        $memories = $this->relevantMemories($conversation, $userMessage);
+        $roleProfile ??= $conversation->roleProfile;
+
+        $memories = $this->relevantMemories($conversation, $userMessage, $roleProfile);
         $recentFailures = TaskLog::query()
             ->where('status', 'error')
             ->latest('id')
@@ -93,9 +126,56 @@ class AgentIdentityService
             }
         }
 
+        $sections = array_merge($sections, $this->outcomeContext($conversation, $userMessage, $roleProfile));
+
         $sections[] = 'Identity rule: behave as a continuing employee-agent. Reuse durable preferences and workflow memory, but correct stale memory when the current environment proves it wrong.';
 
         return "\n\n".implode("\n", $sections);
+    }
+
+    /**
+     * Surface what this employee has actually done before, and whether it held up.
+     *
+     * Verified failures are listed first and an unverified run is labelled as
+     * such, so a confident summary is never mistaken for proof of correctness.
+     *
+     * @return array<int, string>
+     */
+    private function outcomeContext(Conversation $conversation, string $userMessage, ?AgentRoleProfile $roleProfile = null): array
+    {
+        $outcomes = $this->outcomes->relevantOutcomes($roleProfile?->id, $userMessage);
+
+        if ($outcomes->isEmpty()) {
+            return [];
+        }
+
+        $sections = ['Your own record on similar work (only verified runs count as evidence):'];
+
+        foreach ($outcomes as $outcome) {
+            $label = match ($outcome->verdict) {
+                'passed' => 'VERIFIED OK',
+                'failed' => 'VERIFIED FAILED',
+                default => 'NOT VERIFIED',
+            };
+
+            $line = "- [{$label}] ".Str::limit((string) $outcome->intent, 140);
+
+            if ($outcome->verdict === 'failed' && $outcome->failure_reason) {
+                $line .= ' — do not repeat this approach; it failed because: '.Str::limit($outcome->failure_reason, 180);
+            }
+
+            $sections[] = $line;
+        }
+
+        $reliability = $this->outcomes->reliabilitySummary($roleProfile?->id);
+        $sections[] = sprintf(
+            'Your track record so far: %d verified pass, %d verified fail, %d unverified. Treat unverified runs as unproven.',
+            $reliability['verified_passed'],
+            $reliability['verified_failed'],
+            $reliability['unverified'],
+        );
+
+        return $sections;
     }
 
     /**

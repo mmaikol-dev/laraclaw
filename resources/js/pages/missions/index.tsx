@@ -1,4 +1,4 @@
-import { Head } from '@inertiajs/react';
+import { Head, usePoll } from '@inertiajs/react';
 import {
     ChevronDown,
     CircleCheck,
@@ -151,6 +151,8 @@ export default function MissionsIndex({
     opencodeModels,
 }: Props) {
     const [expandedId, setExpandedId] = useState<number | null>(null);
+
+    usePoll(8000, { only: ['missions'] });
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>

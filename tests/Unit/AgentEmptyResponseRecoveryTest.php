@@ -8,6 +8,7 @@ use App\Services\Agent\AgentRunState;
 use App\Services\Agent\AgentService;
 use App\Services\Agent\GoalOwnershipService;
 use App\Services\Agent\OllamaService;
+use App\Services\Agent\OutcomeRecorder;
 use App\Services\Agent\ProactiveMonitoringService;
 use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
@@ -53,6 +54,7 @@ class AgentEmptyResponseRecoveryTest extends TestCase
             Mockery::mock(RoleProfileService::class),
             Mockery::mock(ProactiveMonitoringService::class),
             Mockery::mock(AgentIdentityService::class),
+            new OutcomeRecorder,
         );
 
         $method = new \ReflectionMethod($service, 'recoverEmptyResponse');
@@ -74,6 +76,7 @@ class AgentEmptyResponseRecoveryTest extends TestCase
             Mockery::mock(RoleProfileService::class),
             Mockery::mock(ProactiveMonitoringService::class),
             Mockery::mock(AgentIdentityService::class),
+            new OutcomeRecorder,
         );
 
         $method = new \ReflectionMethod($service, 'shouldRecoverEmptyResponse');

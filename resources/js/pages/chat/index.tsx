@@ -146,6 +146,17 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const bottomRef = useRef<HTMLDivElement | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const runGenerationRef = useRef(0);
+    const abortReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(
+        () => () => {
+            if (abortReloadTimerRef.current !== null) {
+                clearTimeout(abortReloadTimerRef.current);
+            }
+        },
+        [],
+    );
 
     useEffect(() => {
         setActiveConversationId(conversationId);
@@ -413,6 +424,13 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
         const controller = new AbortController();
         abortControllerRef.current = controller;
 
+        if (abortReloadTimerRef.current !== null) {
+            clearTimeout(abortReloadTimerRef.current);
+            abortReloadTimerRef.current = null;
+        }
+        const generation = runGenerationRef.current + 1;
+        runGenerationRef.current = generation;
+
         setIsSending(true);
         setIsStreaming(true);
         setError(null);
@@ -443,7 +461,13 @@ export default function ChatIndex({ conversationId }: { conversationId: number |
                 setLiveThinkingDone(false);
                 if (activeConversationId !== null) {
                     const id = activeConversationId;
-                    setTimeout(() => void loadConversation(id), 300);
+                    abortReloadTimerRef.current = setTimeout(() => {
+                        abortReloadTimerRef.current = null;
+                        if (runGenerationRef.current !== generation) {
+                            return;
+                        }
+                        void loadConversation(id);
+                    }, 300);
                 }
             } else {
                 setError('Your message could not be sent.');

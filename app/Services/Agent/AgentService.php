@@ -10,6 +10,7 @@ use App\Events\ToolExecutionCompleted;
 use App\Events\ToolExecutionFailed;
 use App\Events\ToolExecutionStarted;
 use App\Models\AgentMemory;
+use App\Models\AgentRunOutcome;
 use App\Models\AgentSetting;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -24,6 +25,11 @@ class AgentService
 {
     protected int $emptyRecoveryAttempts = 3;
 
+    /**
+     * Number of streamed chunks between cancellation polls during a response.
+     */
+    private const CANCEL_POLL_EVERY_CHUNKS = 20;
+
     public function __construct(
         protected OllamaService $ollama,
         protected ToolRegistry $tools,
@@ -33,6 +39,7 @@ class AgentService
         protected RoleProfileService $roleProfiles,
         protected ProactiveMonitoringService $proactiveMonitoring,
         protected AgentIdentityService $identity,
+        protected OutcomeRecorder $outcomes,
     ) {}
 
     /**
@@ -43,6 +50,7 @@ class AgentService
         $this->runState->begin($conversation->id);
         $this->affectiveState->begin($conversation->id, $userMessage);
         $roleProfile = $this->roleProfiles->resolveForConversation($conversation, $userMessage);
+        $this->tools->bindRole($roleProfile);
         $this->goalOwnership->beginRun($conversation, $userMessage, $roleProfile?->name);
         $environment = $this->proactiveMonitoring->refreshEnvironmentAwareness();
         $this->proactiveMonitoring->refreshFindings();
@@ -74,7 +82,7 @@ class AgentService
                 .$this->buildCapabilitiesContext()
                 .$this->roleProfiles->buildPromptContext($roleProfile)
                 .$this->goalOwnership->buildPromptContext($conversation)
-                .$this->identity->buildPromptContext($conversation, $userMessage)
+                .$this->identity->buildPromptContext($conversation, $userMessage, $roleProfile)
                 .$this->proactiveMonitoring->buildPromptContext($environment),
         ]];
         $history = [...$history, ...$conversation->fresh()->toOllamaMessages()];
@@ -87,6 +95,7 @@ class AgentService
         $stopSequences = array_filter(array_map('trim', explode(',', (string) AgentSetting::get('stop_sequences', ''))));
         $totalTokensUsed = 0;
         $cancelled = false;
+        $chunksSinceCancelCheck = 0;
 
         if ((bool) AgentSetting::get('enable_planning', false)) {
             $history = $this->runPlanningStep($history, $conversation, $listener);
@@ -110,6 +119,7 @@ class AgentService
                     }
                 }
 
+                $toolCalls = [];
                 $this->runState->markThinking($conversation->id);
                 $this->notify($listener, [
                     'type' => 'status',
@@ -154,6 +164,18 @@ class AgentService
 
                         if ($chunk === '') {
                             continue;
+                        }
+
+                        // Poll for cancellation mid-stream instead of only at iteration
+                        // boundaries, so Stop takes effect during a long response. Polled
+                        // every N chunks because each check costs a cache read.
+                        if (++$chunksSinceCancelCheck >= self::CANCEL_POLL_EVERY_CHUNKS) {
+                            $chunksSinceCancelCheck = 0;
+
+                            if ($this->runState->isCancelled($conversation->id)) {
+                                $cancelled = true;
+                                break;
+                            }
                         }
 
                         if (! $inThinking && $content === '' && $thinkingContent === '' && str_contains($chunk, '<think>')) {
@@ -221,6 +243,10 @@ class AgentService
                     }
                 }
 
+                if ($cancelled) {
+                    break;
+                }
+
                 if (
                     $content === ''
                     && $toolCalls === []
@@ -256,6 +282,13 @@ class AgentService
                     $this->runState->finish($conversation->id, $assistantMessage->id, $stats);
                     $this->goalOwnership->finalizeRun($conversation->fresh(), $assistantMessage);
                     $this->identity->rememberRunOutcome($conversation->fresh(), $assistantMessage->content ?? '');
+                    $this->outcomes->recordChatRun(
+                        $conversation->fresh(),
+                        $userMessage,
+                        AgentRunOutcome::STATUS_COMPLETED,
+                        $assistantMessage->content ?? '',
+                        $toolCalls,
+                    );
                     $this->notify($listener, [
                         'type' => 'done',
                         'message_id' => $assistantMessage->id,
@@ -297,6 +330,14 @@ class AgentService
             $this->runState->fail($conversation->id, 'The agent run failed.');
             $this->goalOwnership->finalizeRun($conversation->fresh(), $assistantMessage);
             $this->identity->rememberRunOutcome($conversation->fresh(), $assistantMessage->content ?? '', 'failure');
+            $this->outcomes->recordChatRun(
+                $conversation->fresh(),
+                $userMessage,
+                AgentRunOutcome::STATUS_FAILED,
+                $assistantMessage->content ?? '',
+                $toolCalls,
+                $exception->getMessage(),
+            );
             $this->notify($listener, ['type' => 'error', 'message' => $exception->getMessage()]);
 
             $emptyStats = ['tokens_per_second' => 0, 'prompt_tokens' => 0, 'completion_tokens' => 0, 'total_duration_ms' => 0, 'load_duration_ms' => 0];

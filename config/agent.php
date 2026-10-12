@@ -36,4 +36,8 @@ return [
         'verification_required' => filter_var(env('AGENT_TASK_VERIFICATION_REQUIRED', true), FILTER_VALIDATE_BOOLEAN),
         'planning_enabled' => filter_var(env('AGENT_TASK_PLANNING_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
     ],
+
+    // Hermes3D office presence: how long an agent-to-agent message keeps
+    // influencing the visible office state (meeting vs. working).
+    'office_message_window_minutes' => (int) env('AGENT_OFFICE_MESSAGE_WINDOW_MINUTES', 10),
 ];

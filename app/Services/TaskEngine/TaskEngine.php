@@ -18,10 +18,14 @@ use App\Events\TaskStepStarted;
 use App\Events\TaskVerificationFailed;
 use App\Events\TaskVerificationPassed;
 use App\Events\TaskVerificationStarted;
+use App\Models\AgentRoleProfile;
+use App\Models\AgentRunOutcome;
 use App\Models\Conversation;
 use App\Models\Task;
 use App\Models\TaskStep;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\OutcomeRecorder;
+use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -43,6 +47,8 @@ class TaskEngine
         protected AgentService $agent,
         protected SpecialistAgents $specialists,
         protected TaskContext $context,
+        protected OutcomeRecorder $outcomes,
+        protected RoleProfileService $roleProfiles,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -98,6 +104,12 @@ class TaskEngine
             $task->transitionTo(TaskStatus::Planning);
         }
 
+        // Persist the routed model so the recorded outcome reflects which model
+        // actually did the work, not just what the caller guessed up front.
+        if (blank($task->model)) {
+            $task->forceFill(['model' => $this->router->modelForTask($task)])->save();
+        }
+
         if ($steps === [] && (bool) config('agent.task.planning_enabled', true)) {
             $steps = $this->generatePlan($task);
         }
@@ -111,11 +123,15 @@ class TaskEngine
         $order = 1;
 
         foreach ($steps as $step) {
+            $description = $step['description'] ?? 'Execute task';
+            $prompt = $step['prompt'] ?? $description;
+
             $persisted[] = $task->steps()->create([
                 'sort_order' => $order,
-                'description' => $step['description'] ?? 'Execute task',
-                'prompt' => $step['prompt'] ?? ($step['description'] ?? null),
+                'description' => $description,
+                'prompt' => $prompt,
                 'depends_on' => $step['depends_on'] ?? null,
+                'role_profile_id' => $this->roleProfileIdForText($description.' '.$prompt),
                 'max_attempts' => (int) config('agent.task.max_step_attempts', 3),
             ]);
 
@@ -415,18 +431,9 @@ class TaskEngine
             return ['output' => '', 'error' => 'Step has no description.'];
         }
 
-        $conversation = $task->conversation;
-
-        if ($conversation === null) {
-            $conversation = Conversation::create([
-                'title' => 'Task: '.str()->limit($task->goal, 60),
-                // Propagate the routed model. Without this the conversation falls
-                // back to the conversations.model column default, which silently
-                // bypasses the complexity router and escalation for every step.
-                'model' => $task->model ?: $this->router->modelForTask($task),
-            ]);
-            $task->update(['conversation_id' => $conversation->id]);
-        }
+        $conversation = $step->role_profile_id !== null
+            ? $this->resolveRoleConversation($task, $step)
+            : $this->resolveTaskConversation($task);
 
         $fullPrompt = $this->buildStepPrompt($task, $step);
 
@@ -443,6 +450,90 @@ class TaskEngine
         } catch (Throwable $exception) {
             return ['output' => '', 'error' => $exception->getMessage()];
         }
+    }
+
+    /**
+     * The task's shared conversation, created lazily when the task had none.
+     */
+    private function resolveTaskConversation(Task $task): Conversation
+    {
+        $conversation = $task->conversation;
+
+        if ($conversation === null) {
+            $conversation = Conversation::create([
+                'title' => 'Task: '.str()->limit($task->goal, 60),
+                // Propagate the routed model. Without this the conversation falls
+                // back to the conversations.model column default, which silently
+                // bypasses the complexity router and escalation for every step.
+                'model' => $task->model ?: $this->router->modelForTask($task),
+            ]);
+            $task->update(['conversation_id' => $conversation->id]);
+        }
+
+        return $conversation;
+    }
+
+    /**
+     * The per-specialist conversation for a role-tagged step. Each role keeps
+     * its own thread so coder, tester and reviewer work never bleed context
+     * into each other. Reuses the step's own conversation on retry and hands
+     * sibling steps of the same role the same thread.
+     */
+    private function resolveRoleConversation(Task $task, TaskStep $step): Conversation
+    {
+        if ($step->conversation_id !== null) {
+            $conversation = Conversation::query()->find($step->conversation_id);
+
+            if ($conversation !== null) {
+                return $conversation;
+            }
+        }
+
+        $siblingId = $task->steps()
+            ->where('id', '!=', $step->id)
+            ->where('role_profile_id', $step->role_profile_id)
+            ->whereNotNull('conversation_id')
+            ->value('conversation_id');
+
+        if ($siblingId !== null) {
+            $conversation = Conversation::query()->find($siblingId);
+
+            if ($conversation !== null) {
+                $step->forceFill(['conversation_id' => $conversation->id])->save();
+
+                return $conversation;
+            }
+        }
+
+        $role = AgentRoleProfile::query()->find($step->role_profile_id);
+        $conversation = Conversation::create([
+            'title' => 'Task: '.str()->limit($task->goal, 60).' ('.($role?->name ?? 'Worker').')',
+            'role_profile_id' => $step->role_profile_id,
+            'identity_label' => $role?->name,
+            // Propagate the routed model so role conversations honor escalation
+            // just like the shared task thread does.
+            'model' => $task->model ?: $this->router->modelForTask($task),
+        ]);
+
+        $step->forceFill(['conversation_id' => $conversation->id])->save();
+
+        return $conversation;
+    }
+
+    /**
+     * Resolve the role profile id a step should be routed to from its text,
+     * or null when no specialty keyword matches (falls back to the shared
+     * task conversation / general operator handling).
+     */
+    private function roleProfileIdForText(string $text): ?int
+    {
+        $slug = $this->roleProfiles->slugForText($text);
+
+        if ($slug === null) {
+            return null;
+        }
+
+        return AgentRoleProfile::query()->where('slug', $slug)->value('id') ?: null;
     }
 
     private function attemptStep(Task $task, TaskStep $step, ?callable $listener): void
@@ -539,6 +630,7 @@ class TaskEngine
             $task->markCompleted();
             event(new TaskVerificationPassed($task, $result));
             event(new TaskCompleted($task));
+            $this->outcomes->recordTask($task, AgentRunOutcome::STATUS_COMPLETED, $result);
             $this->notify($listener, ['type' => 'done', 'status' => 'completed', 'result' => $result]);
 
             return TaskResult::fromTask($task);
@@ -560,7 +652,7 @@ class TaskEngine
             return TaskResult::fromTask($task);
         }
 
-        return $this->fail($task, $reason, TaskFailureType::ValidationError, $listener);
+        return $this->fail($task, $reason, TaskFailureType::ValidationError, $listener, $result);
     }
 
     /**
@@ -598,6 +690,7 @@ class TaskEngine
                 'sort_order' => $nextOrder + $index,
                 'description' => "Repair: {$check}",
                 'prompt' => "The verification check '{$check}' failed for the task. Inspect the current state, diagnose why it failed, fix it, and verify the fix. Check: {$check}",
+                'role_profile_id' => $this->roleProfileIdForText($check),
                 'max_attempts' => (int) config('agent.task.max_step_attempts', 3),
             ]);
         }
@@ -609,10 +702,16 @@ class TaskEngine
     // Failure handling
     // -------------------------------------------------------------------------
 
-    private function fail(Task $task, string $reason, TaskFailureType $failureType, ?callable $listener): TaskResult
+    /**
+     * @param  array<string, mixed>|null  $result  The verifier result, when the
+     *                                             failure came from verification rather
+     *                                             than the worker itself.
+     */
+    private function fail(Task $task, string $reason, TaskFailureType $failureType, ?callable $listener, ?array $result = null): TaskResult
     {
         $task->markFailed($reason, $failureType);
         event(new TaskFailed($task, $reason));
+        $this->outcomes->recordTask($task, AgentRunOutcome::STATUS_FAILED, $result, $reason);
         $this->notify($listener, ['type' => 'error', 'error' => $reason]);
 
         return TaskResult::fromTask($task);

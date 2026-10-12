@@ -1,12 +1,12 @@
 ---
 name: test-skill-scripts
-description: Nesciunt ratione aliquid molestiae deleniti et rem.
-category: writing
-created_by: agent
+description: Eos sint ipsam reprehenderit cum sunt fugiat.
+category: analysis
+created_by: user
 version: 1
 is_active: true
 source: database
 dependencies: []
 ---
 
-Voluptas eaque odit necessitatibus quaerat. Aut ea neque odit hic expedita et ipsa aut. Ratione voluptatem repellendus commodi dicta totam ut.
+Similique dolorum eum quibusdam consequatur iure. Enim expedita voluptas est voluptatem dolores ab. Et suscipit corporis expedita quasi tempora est doloribus officia. Ipsa veritatis pariatur doloribus aliquam eos.

@@ -7,13 +7,21 @@ use App\Models\AgentSetting;
 use App\Models\Mission;
 use App\Models\MissionFeature;
 use App\Models\MissionHandoff;
+use App\Services\Agent\AgentOrchestrator;
 use App\Services\Agent\MissionService;
 use App\Services\Agent\OpenCodeService;
 use RuntimeException;
 
 class MissionTool extends BaseTool
 {
-    public function __construct(private readonly MissionService $missions) {}
+    private readonly AgentOrchestrator $orchestrator;
+
+    public function __construct(
+        private readonly MissionService $missions,
+        ?AgentOrchestrator $orchestrator = null,
+    ) {
+        $this->orchestrator = $orchestrator ?? app(AgentOrchestrator::class);
+    }
 
     public function getName(): string
     {
@@ -214,6 +222,8 @@ OUT;
         }
 
         $mission = Mission::create(['name' => $name, 'goal' => $goal, 'status' => 'scoping']);
+
+        $this->orchestrator->startHuddle($mission);
 
         $scopingNote = '';
 

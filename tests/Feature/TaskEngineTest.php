@@ -4,10 +4,14 @@ namespace Tests\Feature;
 
 use App\Enums\TaskStatus;
 use App\Enums\TaskStepStatus;
+use App\Models\AgentRoleProfile;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\Task;
+use App\Models\TaskStep;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\OutcomeRecorder;
+use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
 use App\Services\TaskEngine\FailureClassifier;
 use App\Services\TaskEngine\LoopDetector;
@@ -152,6 +156,8 @@ class TaskEngineTest extends TestCase
             $agent,
             $this->app->make(SpecialistAgents::class),
             $this->app->make(TaskContext::class),
+            new OutcomeRecorder,
+            $this->app->make(RoleProfileService::class),
         );
 
         $task = Task::factory()->create(['goal' => 'Fix the broken login']);
@@ -244,6 +250,8 @@ class TaskEngineTest extends TestCase
             $this->agent,
             $this->app->make(SpecialistAgents::class),
             $this->app->make(TaskContext::class),
+            new OutcomeRecorder,
+            $this->app->make(RoleProfileService::class),
         );
 
         $task = Task::factory()->create(['goal' => 'Fix the broken login']);
@@ -264,5 +272,66 @@ class TaskEngineTest extends TestCase
 
         $this->assertSame(3, $task->steps()->count());
         $this->assertSame(1, $this->planningCalls);
+    }
+
+    public function test_plan_assigns_a_role_profile_to_steps_from_keywords(): void
+    {
+        $this->profile('devops_operator', 'DevOps Operator');
+        $this->profile('qa_operator', 'QA Operator');
+        $this->profile('laravel_architect', 'Laravel Architect');
+
+        $task = Task::factory()->create(['goal' => 'Ship the full pipeline']);
+
+        $this->engine->plan($task, [
+            ['description' => 'Deploy the app to the staging server'],
+            ['description' => 'Add a Laravel migration for orders'],
+            ['description' => 'Write regression tests and verify coverage'],
+        ]);
+        $task->refresh();
+
+        $roles = $task->steps()->with('roleProfile')->get()
+            ->map(fn (TaskStep $step): ?string => $step->roleProfile?->slug)
+            ->all();
+
+        $this->assertSame(['devops_operator', 'laravel_architect', 'qa_operator'], $roles);
+    }
+
+    public function test_role_tagged_steps_run_in_dedicated_per_role_conversations(): void
+    {
+        $devops = $this->profile('devops_operator', 'DevOps Operator');
+        $qa = $this->profile('qa_operator', 'QA Operator');
+
+        $task = Task::factory()->create(['goal' => 'Set up deployment and verify it']);
+
+        $this->engine->plan($task, [
+            ['description' => 'Deploy the app to the server'],
+            ['description' => 'Write regression tests and verify coverage'],
+        ]);
+        $task->refresh();
+
+        $this->engine->execute($task);
+        $task->refresh();
+
+        $steps = $task->steps()->get();
+
+        $this->assertNotNull($steps[0]->conversation_id);
+        $this->assertNotNull($steps[1]->conversation_id);
+        $this->assertNotSame($steps[0]->conversation_id, $steps[1]->conversation_id);
+
+        $roleIds = Conversation::query()
+            ->whereKey([$steps[0]->conversation_id, $steps[1]->conversation_id])
+            ->pluck('role_profile_id')
+            ->all();
+
+        $this->assertEqualsCanonicalizing([$devops->id, $qa->id], $roleIds);
+    }
+
+    private function profile(string $slug, string $name): AgentRoleProfile
+    {
+        return AgentRoleProfile::query()->create([
+            'slug' => $slug,
+            'name' => $name,
+            'is_active' => true,
+        ]);
     }
 }

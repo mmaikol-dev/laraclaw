@@ -7,6 +7,30 @@ use Illuminate\Support\Carbon;
 
 class AgentRunState
 {
+    /**
+     * Minimum milliseconds between streamed-chunk cache writes.
+     */
+    private const CHUNK_FLUSH_INTERVAL_MS = 400;
+
+    /**
+     * Buffered chunk length that forces an immediate cache write.
+     */
+    private const CHUNK_FLUSH_CHARS = 240;
+
+    /**
+     * Streamed chunks buffered in memory between cache writes.
+     *
+     * @var array<int, string>
+     */
+    private array $pendingChunks = [];
+
+    /**
+     * Unix microtime of the last cache write, per conversation.
+     *
+     * @var array<int, float>
+     */
+    private array $lastChunkFlushAt = [];
+
     public function __construct(
         protected Repository $cache,
     ) {}
@@ -17,6 +41,8 @@ class AgentRunState
     public function begin(int $conversationId): array
     {
         $this->cache->forget($this->cancelKey($conversationId));
+
+        unset($this->pendingChunks[$conversationId], $this->lastChunkFlushAt[$conversationId]);
 
         $state = [
             'conversation_id' => $conversationId,
@@ -50,18 +76,69 @@ class AgentRunState
     /**
      * @return array<string, mixed>
      */
-    public function appendChunk(int $conversationId, string $chunk): array
+    /**
+     * Buffer a streamed chunk, flushing to the cache on an interval or size threshold.
+     *
+     * Writing on every token costs two database round-trips per token and
+     * re-serialises the whole run state each time, which is what made long
+     * responses hang and grow memory. The buffer is always folded into the
+     * next state write, so terminal states never lose streamed text.
+     */
+    public function appendChunk(int $conversationId, string $chunk): void
     {
-        return $this->mutate($conversationId, function (array $state) use ($chunk): array {
-            $state['status'] = 'responding';
-            $state['draft'] = (($state['draft'] ?? '').$chunk);
+        $this->pendingChunks[$conversationId] = ($this->pendingChunks[$conversationId] ?? '').$chunk;
 
-            if (! $this->hasStepType($state['steps'] ?? [], 'responding')) {
-                $state['steps'] = $this->appendStep($state['steps'] ?? [], $this->step('responding', 'Streaming reply.'));
-            }
+        $elapsedMs = (microtime(true) - ($this->lastChunkFlushAt[$conversationId] ?? 0.0)) * 1000;
+        $bufferedLength = mb_strlen($this->pendingChunks[$conversationId]);
 
-            return $state;
-        });
+        if ($elapsedMs >= self::CHUNK_FLUSH_INTERVAL_MS || $bufferedLength >= self::CHUNK_FLUSH_CHARS) {
+            $this->flushChunks($conversationId);
+        }
+    }
+
+    /**
+     * Fold any buffered chunks into the cache-backed state.
+     *
+     * @return array<string, mixed>
+     */
+    private function flushChunks(int $conversationId): array
+    {
+        if (($this->pendingChunks[$conversationId] ?? '') === '') {
+            $this->lastChunkFlushAt[$conversationId] = microtime(true);
+
+            return $this->get($conversationId);
+        }
+
+        return $this->mutate($conversationId, static fn (array $state): array => $state);
+    }
+
+    /**
+     * @param  array<string, mixed>  $state
+     * @return array<string, mixed>
+     */
+    private function applyBufferedChunks(int $conversationId, array $state): array
+    {
+        $state['status'] = 'responding';
+        $state['draft'] = (($state['draft'] ?? '').($this->drainBufferFor($conversationId)));
+
+        if (! $this->hasStepType($state['steps'] ?? [], 'responding')) {
+            $state['steps'] = $this->appendStep($state['steps'] ?? [], $this->step('responding', 'Streaming reply.'));
+        }
+
+        return $state;
+    }
+
+    /**
+     * Drain and return the buffered text for a conversation.
+     */
+    private function drainBufferFor(int $conversationId): string
+    {
+        $buffered = $this->pendingChunks[$conversationId] ?? '';
+
+        unset($this->pendingChunks[$conversationId]);
+        $this->lastChunkFlushAt[$conversationId] = microtime(true);
+
+        return $buffered;
     }
 
     /**
@@ -161,6 +238,8 @@ class AgentRunState
 
     public function clear(int $conversationId): void
     {
+        unset($this->pendingChunks[$conversationId], $this->lastChunkFlushAt[$conversationId]);
+
         $this->cache->forget($this->key($conversationId));
         $this->cache->forget($this->cancelKey($conversationId));
     }
@@ -172,6 +251,11 @@ class AgentRunState
     private function mutate(int $conversationId, callable $callback, int $minutes = 10): array
     {
         $state = $this->get($conversationId);
+
+        if (($this->pendingChunks[$conversationId] ?? '') !== '') {
+            $state = $this->applyBufferedChunks($conversationId, $state);
+        }
+
         $state = $callback($state);
         $state['updated_at'] = now()->toISOString();
 

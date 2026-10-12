@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FileController;
+use App\Http\Controllers\Api\Hermes3dRuntimeController;
 use App\Http\Controllers\Api\MetricsController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SkillController;
@@ -64,4 +65,16 @@ Route::prefix('v1')->group(function () {
     Route::post('settings', [SettingsController::class, 'update'])->name('api.settings.update');
     Route::delete('settings/tasks', [SettingsController::class, 'clearTasks'])->name('api.settings.tasks.clear');
     Route::delete('settings/conversations', [SettingsController::class, 'archiveConversations'])->name('api.settings.conversations.archive');
+});
+
+// Hermes3D custom runtime provider contract (point a `custom` profile here).
+Route::prefix('hermes3d')->group(function () {
+    Route::get('health', [Hermes3dRuntimeController::class, 'health'])->name('api.hermes3d.health');
+    Route::get('state', [Hermes3dRuntimeController::class, 'state'])->name('api.hermes3d.state');
+    Route::get('registry', [Hermes3dRuntimeController::class, 'registry'])->name('api.hermes3d.registry');
+    Route::get('presence', [Hermes3dRuntimeController::class, 'presence'])->name('api.hermes3d.presence');
+    Route::get('layout', [Hermes3dRuntimeController::class, 'layout'])->name('api.hermes3d.layout');
+    Route::get('agents/{agent}/messages', [Hermes3dRuntimeController::class, 'agentMessages'])->name('api.hermes3d.agents.messages');
+    Route::post('agents/{agent}/messages', [Hermes3dRuntimeController::class, 'sendAgentMessage'])->name('api.hermes3d.agents.messages.store');
+    Route::post('v1/chat/completions', [Hermes3dRuntimeController::class, 'chatCompletions'])->name('api.hermes3d.chat');
 });

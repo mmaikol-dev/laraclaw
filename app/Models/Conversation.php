@@ -7,12 +7,14 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Conversation extends Model
 {
     use HasFactory;
 
     protected $fillable = [
+        'external_key',
         'title',
         'model',
         'role_profile_id',
@@ -71,6 +73,17 @@ class Conversation extends Model
     public function taskLogs(): HasMany
     {
         return $this->hasMany(TaskLog::class)->latest();
+    }
+
+    /**
+     * The autonomous task, if any, executing inside this conversation.
+     *
+     * Task steps run as ordinary agent runs, so this is what distinguishes an
+     * internal step prompt from a request the user actually asked.
+     */
+    public function task(): HasOne
+    {
+        return $this->hasOne(Task::class);
     }
 
     /**

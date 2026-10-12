@@ -1,4 +1,4 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { AlertTriangle, CircleHelp, CirclePause, LoaderCircle, Play, RotateCcw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -81,6 +81,8 @@ function statusVariant(status: TaskStatus): 'default' | 'secondary' | 'outline' 
 
 export default function AgentTasksIndex({ tasks, filters, metrics }: AgentTasksIndexProps) {
     const [busy, setBusy] = useState<Record<string, string | null>>({});
+
+    usePoll(8000, { only: ['tasks', 'metrics'] });
 
     async function runAction(taskId: number, action: string, body: Record<string, unknown> = {}): Promise<void> {
         setBusy((current) => ({ ...current, [taskId]: action }));

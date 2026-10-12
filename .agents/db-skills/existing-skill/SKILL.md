@@ -1,7 +1,7 @@
 ---
 name: existing-skill
-description: Deserunt illo eligendi nihil fugit debitis.
-category: writing
+description: Doloribus molestiae ea qui quia at veritatis ipsam debitis.
+category: data
 created_by: agent
 version: 
 is_active: true
@@ -9,4 +9,4 @@ source: database
 dependencies: []
 ---
 
-Deserunt magnam est non saepe. Ratione recusandae ab ut repellendus. Maxime voluptas necessitatibus et dolores qui ipsum dolores.
+Ut quae molestiae adipisci necessitatibus ad sed dolorem. Blanditiis ad ut recusandae laboriosam provident eaque perspiciatis temporibus. Dicta incidunt in ut quis eum. Recusandae hic necessitatibus laborum dignissimos error quis est.

@@ -25,6 +25,13 @@ class MissionService
      */
     public const DEFAULT_MAX_FEATURE_ATTEMPTS = 6;
 
+    private readonly AgentOrchestrator $orchestrator;
+
+    public function __construct(?AgentOrchestrator $orchestrator = null)
+    {
+        $this->orchestrator = $orchestrator ?? app(AgentOrchestrator::class);
+    }
+
     /**
      * Orchestrator scoping prompt: decompose the goal into features grouped by
      * milestones plus a Validation Contract, before any implementation begins.
@@ -274,6 +281,8 @@ PROMPT;
         }
 
         $next['feature']->markAttempted();
+
+        $this->orchestrator->assignFeature($next['feature'], $next['role']);
 
         AdvanceMissionJob::dispatch($mission->id, $next['role'], $next['feature']->id);
 

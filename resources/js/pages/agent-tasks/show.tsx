@@ -1,4 +1,4 @@
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, usePoll } from '@inertiajs/react';
 import { CheckCircle2, ChevronLeft, CircleDot, ClipboardList, History, Play, Square, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -111,6 +111,8 @@ function ActionIcon({ status }: { status: string }) {
 
 export default function AgentTasksShow({ task, context_summary }: AgentTaskShowProps) {
     const progress = task.total_steps > 0 ? Math.round((task.current_step / task.total_steps) * 100) : 0;
+
+    usePoll(5000, { only: ['task', 'context_summary'] });
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Agent Tasks', href: agentTasks() },

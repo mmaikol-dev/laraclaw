@@ -3,10 +3,64 @@
 namespace App\Services\Tools;
 
 use App\Models\AgentMemory;
+use App\Models\AgentRoleProfile;
+use Illuminate\Database\Eloquent\Builder;
 use RuntimeException;
 
 class MemoryTool extends BaseTool
 {
+    /**
+     * Scopes the shared scopes that stay visible to every employee.
+     *
+     * @var array<int, string>
+     */
+    private const SHARED_SCOPES = ['global', 'user', 'environment'];
+
+    public function __construct(private readonly ?AgentRoleProfile $role = null) {}
+
+    /**
+     * The employee namespace prefix, built here rather than supplied by the model.
+     *
+     * A model-supplied prefix would let one employee write into another's
+     * namespace, which is the exact leak the role scope exists to prevent.
+     */
+    private function prefix(): string
+    {
+        return $this->role === null ? '' : 'role:'.$this->role->slug.':';
+    }
+
+    /**
+     * Strip any namespace the model tried to smuggle into the key.
+     */
+    private function sanitiseKey(string $key): string
+    {
+        return trim(str_replace(':', '', $key));
+    }
+
+    /**
+     * Restrict reads to this employee's own memories plus the shared ones.
+     *
+     * @param  Builder<AgentMemory>  $query
+     * @return Builder<AgentMemory>
+     */
+    private function visible(Builder $query): Builder
+    {
+        if ($this->role === null) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $q): void {
+            $q->whereIn('scope', self::SHARED_SCOPES)
+                ->orWhere(function (Builder $own) {
+                    $own
+                        ->where('scope', 'role')
+                        ->where('subject_type', AgentRoleProfile::class)
+                        ->where('subject_id', $this->role->id);
+                })
+                ->orWhere('key', 'like', $this->prefix().'%');
+        });
+    }
+
     public function getName(): string
     {
         return 'memory';
@@ -72,12 +126,29 @@ class MemoryTool extends BaseTool
             throw new RuntimeException('key and value are required for set.');
         }
 
+        $key = $this->sanitiseKey($key);
+
+        if ($key === '') {
+            throw new RuntimeException('key is required for set.');
+        }
+
         $expiresAt = isset($args['ttl_days']) ? now()->addDays((int) $args['ttl_days']) : null;
 
-        AgentMemory::updateOrCreate(['key' => $key], [
+        $scope = (string) ($args['scope'] ?? 'global');
+
+        // A bound employee owns its experience unless the agent explicitly asks
+        // for a shared scope; defaulting to global would strand every write in
+        // a pool no single employee reads as its own.
+        $requestedShared = isset($args['scope']) && in_array($scope, self::SHARED_SCOPES, true);
+        $isOwnNamespace = $this->role !== null && ! $requestedShared;
+        $storedKey = $isOwnNamespace ? $this->prefix().$key : $key;
+
+        AgentMemory::updateOrCreate(['key' => $storedKey], [
             'value' => $value,
             'category' => (string) ($args['category'] ?? 'general'),
-            'scope' => (string) ($args['scope'] ?? 'global'),
+            'scope' => $isOwnNamespace ? 'role' : $scope,
+            'subject_type' => $isOwnNamespace ? AgentRoleProfile::class : null,
+            'subject_id' => $isOwnNamespace ? $this->role->id : null,
             'source' => (string) ($args['source'] ?? 'agent'),
             'confidence' => min(1, max(0, (float) ($args['confidence'] ?? 1))),
             'tags' => is_array($args['tags'] ?? null) ? $args['tags'] : null,
@@ -85,7 +156,7 @@ class MemoryTool extends BaseTool
             'last_observed_at' => now(),
         ]);
 
-        return "Memory '{$key}' saved.".($expiresAt ? " Expires: {$expiresAt->toDateString()}." : '');
+        return "Memory '{$storedKey}' saved.".($expiresAt ? " Expires: {$expiresAt->toDateString()}." : '');
     }
 
     private function get(string $key): string
@@ -94,7 +165,7 @@ class MemoryTool extends BaseTool
             throw new RuntimeException('key is required for get.');
         }
 
-        $mem = AgentMemory::active()->where('key', $key)->first();
+        $mem = $this->visible(AgentMemory::active())->where('key', $key)->first();
 
         if ($mem === null) {
             return "No memory found for key '{$key}'.";
@@ -110,7 +181,7 @@ class MemoryTool extends BaseTool
             throw new RuntimeException('query is required for search.');
         }
 
-        $memories = AgentMemory::active()
+        $memories = $this->visible(AgentMemory::active())
             ->where(fn ($q) => $q->where('key', 'like', "%{$query}%")->orWhere('value', 'like', "%{$query}%"))
             ->get();
 
@@ -125,7 +196,7 @@ class MemoryTool extends BaseTool
 
     private function list(?string $category): string
     {
-        $query = AgentMemory::active()->orderBy('category')->orderBy('key');
+        $query = $this->visible(AgentMemory::active())->orderBy('category')->orderBy('key');
 
         if ($category) {
             $query->where('category', $category);
@@ -149,7 +220,7 @@ class MemoryTool extends BaseTool
             throw new RuntimeException('key is required for delete.');
         }
 
-        $deleted = AgentMemory::where('key', $key)->delete();
+        $deleted = $this->visible(AgentMemory::query())->where('key', $key)->delete();
 
         return $deleted ? "Memory '{$key}' deleted." : "Memory '{$key}' not found.";
     }

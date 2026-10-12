@@ -2,7 +2,9 @@
 
 namespace App\Services\Agent;
 
+use App\Models\AgentRoleProfile;
 use App\Services\Tools\BaseTool;
+use App\Services\Tools\MemoryTool;
 use App\Services\Tools\StreamsOutput;
 
 class ToolRegistry
@@ -19,6 +21,18 @@ class ToolRegistry
     public function register(BaseTool $tool): void
     {
         $this->tools[$tool->getName()] = $tool;
+    }
+
+    /**
+     * Rebind the memory tool to the employee handling the current run.
+     *
+     * A fresh instance is constructed per run so the namespace prefix is always
+     * fixed in code from the resolved role, never carried over from a previous
+     * run in a long-lived worker.
+     */
+    public function bindRole(?AgentRoleProfile $role): void
+    {
+        $this->register(new MemoryTool($role));
     }
 
     public function get(string $name): ?BaseTool

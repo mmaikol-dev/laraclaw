@@ -109,28 +109,41 @@ class RoleProfileService
     {
         $this->ensureDefaults();
 
-        if ($conversation->relationLoaded('roleProfile') && $conversation->roleProfile !== null) {
-            return $conversation->roleProfile;
-        }
-
-        if ($conversation->role_profile_id !== null) {
-            return $conversation->roleProfile()->first();
-        }
-
         $slug = $this->inferSlugFromMessage($message);
+
+        if ($slug === null) {
+            // No clear specialty signal ("yes, do it", "continue"). Keeping the
+            // current employee stops follow-ups from swapping the operator
+            // mid-task on an arbitrary guess.
+            $current = $conversation->relationLoaded('roleProfile')
+                ? $conversation->roleProfile
+                : $conversation->roleProfile()->first();
+
+            if ($current !== null) {
+                return $current;
+            }
+
+            $slug = 'general_operator';
+        }
+
         $profile = AgentRoleProfile::query()
             ->where('slug', $slug)
             ->orWhere('slug', 'general_operator')
             ->orderByRaw('slug = ? desc', [$slug])
             ->first();
 
-        if ($profile !== null) {
+        if ($profile === null) {
+            return null;
+        }
+
+        if ($conversation->role_profile_id !== $profile->id) {
             $conversation->forceFill([
                 'role_profile_id' => $profile->id,
                 'identity_label' => $profile->name,
             ])->save();
-            $conversation->setRelation('roleProfile', $profile);
         }
+
+        $conversation->setRelation('roleProfile', $profile);
 
         return $profile;
     }
@@ -158,7 +171,17 @@ class RoleProfileService
             ."- High-risk actions: delete data, force git history changes, run production migrations, expose secrets, change permissions broadly, or stop critical services; pause and ask for approval or choose a safer dry-run/read-only path.\n";
     }
 
-    private function inferSlugFromMessage(string $message): string
+    /**
+     * Best-effort role slug for a free-text description (a task goal, a mission
+     * feature, a message). Returns null when no specialty keyword matches so
+     * callers can apply their own default instead of guessing wildly.
+     */
+    public function slugForText(string $text): ?string
+    {
+        return $this->inferSlugFromMessage($text);
+    }
+
+    private function inferSlugFromMessage(string $message): ?string
     {
         $normalized = strtolower($message);
 
@@ -182,7 +205,7 @@ class RoleProfileService
             str_contains($normalized, 'eloquent'),
             str_contains($normalized, 'inertia'),
             str_contains($normalized, 'migration') => 'laravel_architect',
-            default => 'general_operator',
+            default => null,
         };
     }
 }

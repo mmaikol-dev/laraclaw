@@ -1,12 +1,12 @@
 ---
 name: no-scripts-skill
-description: Esse enim animi incidunt ratione dolorum architecto quibusdam ut.
-category: general
-created_by: agent
+description: Odit cum voluptatem natus.
+category: research
+created_by: user
 version: 
 is_active: true
 source: database
 dependencies: []
 ---
 
-Neque placeat nesciunt necessitatibus doloribus explicabo tempora. Tenetur optio sunt quas possimus aut. Nulla temporibus natus sunt quis voluptatem aperiam.
+Quia quis eius sit expedita ipsum dolorem voluptatum. Dignissimos qui eveniet ut quod dolorem. Laborum facere tenetur harum ipsum. Voluptatem reiciendis quibusdam exercitationem et occaecati quis. Maiores quis hic nemo voluptatem fuga.

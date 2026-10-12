@@ -18,20 +18,30 @@ class MissionController extends Controller
             ->orderBy('name')
             ->get();
 
-        $models = [];
-
-        try {
-            if ($this->openCode->isAvailable()) {
-                $models = $this->openCode->models();
-            }
-        } catch (\Throwable) {
-            $models = [];
-        }
-
         return Inertia::render('missions/index', [
             'missions' => $missions,
-            'opencodeAvailable' => $this->openCode->isAvailable(),
-            'opencodeModels' => $models,
+            // Lazy props: the page polls `missions` every few seconds, and
+            // resolving the OpenCode model list spawns a process. Deferring
+            // them to closures keeps those process spawns off the poll path.
+            'opencodeAvailable' => fn (): bool => $this->openCode->isAvailable(),
+            'opencodeModels' => fn (): array => $this->openCodeModels(),
         ]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function openCodeModels(): array
+    {
+        try {
+            if ($this->openCode->isAvailable()) {
+                return $this->openCode->models();
+            }
+        } catch (\Throwable) {
+            // OpenCode is optional; a missing or broken binary must not break
+            // the missions page.
+        }
+
+        return [];
     }
 }
