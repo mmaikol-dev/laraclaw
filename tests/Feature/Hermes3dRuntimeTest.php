@@ -285,6 +285,50 @@ class Hermes3dRuntimeTest extends TestCase
         $this->assertSame('idle', $agents['qa_operator']['state']);
     }
 
+    public function test_presence_lists_the_task_engine_specialists(): void
+    {
+        $agents = $this->presenceAgents();
+
+        $this->assertSame('Planner', $agents['specialist-planner']['name']);
+        $this->assertSame('Reviewer', $agents['specialist-reviewer']['name']);
+        $this->assertSame('idle', $agents['specialist-planner']['state']);
+        $this->assertSame('desk-specialist-planner', $agents['specialist-planner']['preferredDeskId']);
+    }
+
+    public function test_layout_returns_a_desk_per_task_engine_specialist(): void
+    {
+        $desks = $this->layoutDeskIds();
+
+        $this->assertContains('desk-specialist-planner', $desks);
+        $this->assertContains('desk-specialist-reviewer', $desks);
+        $this->assertContains('desk-specialist-tester', $desks);
+    }
+
+    public function test_presence_marks_a_specialist_working_for_an_in_flight_step(): void
+    {
+        $task = Task::factory()->running()->create(['goal' => 'Improve the checkout flow']);
+
+        $task->steps()->create([
+            'sort_order' => 1,
+            'status' => TaskStepStatus::Running,
+            'description' => 'Review the pull request for regressions',
+        ]);
+
+        $agents = $this->presenceAgents();
+
+        $this->assertSame('working', $agents['specialist-reviewer']['state']);
+        $this->assertSame('idle', $agents['specialist-coder']['state']);
+    }
+
+    public function test_presence_marks_the_planner_working_while_a_task_is_planning(): void
+    {
+        Task::factory()->create(['status' => TaskStatus::Planning]);
+
+        $agents = $this->presenceAgents();
+
+        $this->assertSame('working', $agents['specialist-planner']['state']);
+    }
+
     public function test_multiple_roles_can_huddle_in_the_meeting_room_at_once(): void
     {
         $qa = $this->activeProfile('qa_operator', 'QA Operator');

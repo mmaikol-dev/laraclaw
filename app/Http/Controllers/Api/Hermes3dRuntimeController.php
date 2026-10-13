@@ -14,10 +14,12 @@ use App\Models\Mission;
 use App\Models\MissionFeature;
 use App\Models\ScheduledTask;
 use App\Models\Task;
+use App\Models\TaskStep;
 use App\Services\Agent\AgentOrchestrator;
 use App\Services\Agent\AgentService;
+use App\Services\TaskEngine\SpecialistAgents;
+use App\Services\TaskEngine\SpecialistProfile;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -32,6 +34,7 @@ class Hermes3dRuntimeController extends Controller
     public function __construct(
         protected AgentService $agent,
         protected AgentOrchestrator $orchestrator,
+        protected SpecialistAgents $specialists,
     ) {}
 
     public function health(): JsonResponse
@@ -98,18 +101,39 @@ class Hermes3dRuntimeController extends Controller
      */
     public function layout(): JsonResponse
     {
-        $profiles = AgentRoleProfile::query()
+        $profileSlugs = AgentRoleProfile::query()
             ->where('is_active', true)
             ->orderBy('name')
-            ->get(['slug']);
+            ->pluck('slug');
+
+        $specialistSlugs = $this->specialistDeskSlugs();
 
         return response()->json([
             'gatewayUrl' => rtrim((string) config('app.url'), '/'),
             'timestamp' => now()->toISOString(),
             'width' => 1800,
             'height' => 720,
-            'furniture' => $this->officeFurniture($profiles),
+            'furniture' => $this->officeFurniture($profileSlugs->concat($specialistSlugs)->values()->all()),
         ]);
+    }
+
+    /**
+     * Desk slugs for the task-engine specialists, mapped the same way presence
+     * advertises them so `preferredDeskId` always resolves to a layout desk.
+     *
+     * @return array<int, string>
+     */
+    private function specialistDeskSlugs(): array
+    {
+        return collect($this->specialists->all())
+            ->map(fn (SpecialistProfile $profile): string => $this->specialistDeskSlug($profile->slug))
+            ->values()
+            ->all();
+    }
+
+    private function specialistDeskSlug(string $specialistSlug): string
+    {
+        return 'specialist-'.$specialistSlug;
     }
 
     /**
@@ -259,6 +283,17 @@ class Hermes3dRuntimeController extends Controller
             'preferredDeskId' => $this->deskId('scheduler'),
         ];
 
+        $specialistStates = $this->specialistOfficeStates();
+
+        foreach ($this->specialists->all() as $specialist) {
+            $agents[] = [
+                'agentId' => $this->specialistDeskSlug($specialist->slug),
+                'name' => $specialist->name,
+                'state' => $specialistStates[$specialist->slug] ?? 'idle',
+                'preferredDeskId' => $this->deskId($this->specialistDeskSlug($specialist->slug)),
+            ];
+        }
+
         return $agents;
     }
 
@@ -268,23 +303,24 @@ class Hermes3dRuntimeController extends Controller
     }
 
     /**
-     * Furniture for the Hermes3D office map: a desk per active role profile
-     * surrounded by a small lobby and break room so the scene is explorable.
+     * Furniture for the Hermes3D office map: a desk per active role profile and
+     * task-engine specialist, surrounded by a small lobby and break room so the
+     * scene is explorable.
      *
-     * @param  Collection<int, AgentRoleProfile>  $profiles
+     * @param  array<int, string>  $deskSlugs
      * @return array<int, array<string, mixed>>
      */
-    private function officeFurniture(Collection $profiles): array
+    private function officeFurniture(array $deskSlugs): array
     {
         $furniture = [];
 
-        foreach ($profiles->values() as $index => $profile) {
-            $column = $index % 4;
-            $row = intdiv($index, 4);
+        foreach ($deskSlugs as $index => $slug) {
+            $column = $index % 6;
+            $row = intdiv($index, 6);
 
             $furniture = array_merge(
                 $furniture,
-                $this->deskFurniture($profile->slug, 100 + $column * 200, 300 + $row * 220),
+                $this->deskFurniture((string) $slug, 100 + $column * 200, 300 + $row * 200),
             );
         }
 
@@ -425,6 +461,59 @@ class Hermes3dRuntimeController extends Controller
                 $states[$roleId] ?? 'idle',
                 $this->officeStateForTask($task->status),
             );
+        }
+
+        return $states;
+    }
+
+    /**
+     * Office state implied by in-flight task steps for the task-engine
+     * specialists (planner, coder, tester, reviewer, ...). A specialist is
+     * "working" while a pending/running/retrying step resolves to it, so the
+     * office reflects the function actually executing rather than only the role
+     * profile that owns the conversation.
+     *
+     * @return array<string, string> Specialist slug => office state.
+     */
+    private function specialistOfficeStates(): array
+    {
+        $steps = TaskStep::query()
+            ->whereIn('status', [
+                TaskStepStatus::Pending->value,
+                TaskStepStatus::Running->value,
+                TaskStepStatus::Retrying->value,
+            ])
+            ->with(['task' => fn ($query) => $query->select('id', 'status', 'goal')])
+            ->orderBy('sort_order')
+            ->get(['id', 'task_id', 'status', 'description', 'prompt']);
+
+        $states = [];
+
+        foreach ($steps as $step) {
+            $task = $step->task;
+
+            if (! $task instanceof Task) {
+                continue;
+            }
+
+            $slug = $this->specialists->resolve($task, $step)->slug;
+
+            $states[$slug] = $this->highestPriority(
+                $states[$slug] ?? 'idle',
+                $this->officeStateForTask($task->status),
+            );
+        }
+
+        // The planner runs synchronously while a task is being decomposed
+        // (`generatePlan()`), which happens before any step rows exist — so it
+        // has no step to be resolved from. Surface it from task status instead:
+        // Pending = goal handed to the engine, Planning = plan being produced.
+        $plannerActive = Task::query()
+            ->whereIn('status', [TaskStatus::Pending->value, TaskStatus::Planning->value])
+            ->exists();
+
+        if ($plannerActive) {
+            $states['planner'] = $this->highestPriority($states['planner'] ?? 'idle', 'working');
         }
 
         return $states;
