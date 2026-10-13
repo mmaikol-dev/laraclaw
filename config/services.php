@@ -52,4 +52,12 @@ return [
         ),
     ],
 
+    'facebook' => [
+        'graph_url' => env('FACEBOOK_GRAPH_URL', 'https://graph.facebook.com/v21.0'),
+    ],
+
+    'instagram' => [
+        'graph_url' => env('INSTAGRAM_GRAPH_URL', 'https://graph.facebook.com/v21.0'),
+    ],
+
 ];

@@ -864,6 +864,10 @@ class TaskEngine
             $task->clearWaiting();
         }
 
+        // Reset the execution window so a recovered task is not immediately
+        // re-flagged as stalled by the supervisor on the next pass.
+        $task->touchHeartbeat();
+
         $this->notify($listener, [
             'type' => 'status',
             'status' => 'recovering',

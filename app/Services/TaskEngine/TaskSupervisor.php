@@ -30,20 +30,12 @@ class TaskSupervisor
     {
         $actions = [];
 
-        // 1. Stale tasks (no heartbeat for over the grace period + interval).
-        //    Paused tasks are excluded — a pause is a deliberate user hold.
-        $grace = (int) config('agent.task.stale_grace_seconds', 120);
-        $stale = Task::query()
-            ->active()
-            ->where('status', '!=', TaskStatus::Paused)
-            ->whereNotNull('last_heartbeat_at')
-            ->where('last_heartbeat_at', '<', now()->subSeconds($grace))
-            ->get()
-            ->filter(fn (Task $task): bool => $task->status !== TaskStatus::Waiting || $this->engine->resumeConditionMet($task));
-
-        foreach ($stale as $task) {
-            $actions[] = $this->recoverStale($task);
-        }
+        // 1. Progress-aware stuck detection. A task that has made no progress
+        //    (no heartbeat) within the execution window is genuinely stuck.
+        //    Long-running tasks that keep heartbeating are never failed here.
+        //    Runs before recovery so a genuinely stuck task is failed rather
+        //    than recovered with a freshly reset heartbeat.
+        $this->detectStuckSteps($actions);
 
         // 2. Tasks with excessive attempts (should be escalated or failed by engine, but guard here)
         $max = (int) config('agent.task.max_attempts', 5);
@@ -61,8 +53,21 @@ class TaskSupervisor
                 ];
             });
 
-        // 3. Tasks stuck on the same step for too long (no progress, no new heartbeat)
-        $this->detectStuckSteps($actions);
+        // 3. Stale tasks (no heartbeat for over the grace period + interval).
+        //    Paused tasks are excluded — a pause is a deliberate user hold.
+        //    Recovered tasks are re-queued and get a fresh execution window.
+        $grace = (int) config('agent.task.stale_grace_seconds', 120);
+        $stale = Task::query()
+            ->active()
+            ->where('status', '!=', TaskStatus::Paused)
+            ->whereNotNull('last_heartbeat_at')
+            ->where('last_heartbeat_at', '<', now()->subSeconds($grace))
+            ->get()
+            ->filter(fn (Task $task): bool => $task->status !== TaskStatus::Waiting || $this->engine->resumeConditionMet($task));
+
+        foreach ($stale as $task) {
+            $actions[] = $this->recoverStale($task);
+        }
 
         // 4. Waiting tasks whose resume condition is now satisfied — resume
         //    them automatically and re-queue execution.
@@ -120,8 +125,10 @@ class TaskSupervisor
     }
 
     /**
-     * Detect tasks whose current step hasn't changed and that haven't
-     * heartbeated in a long time (hard stuck).
+     * Detect tasks that have made no progress (no heartbeat) within the
+     * execution window. This is progress-aware: a task may run for hours as
+     * long as it keeps heartbeating at each step, and is only failed once it
+     * has been silent for the full window.
      *
      * @param  array<int, array<string, mixed>>  $actions
      */
@@ -131,15 +138,15 @@ class TaskSupervisor
 
         Task::query()
             ->whereIn('status', [TaskStatus::Running, TaskStatus::Retrying])
-            ->whereNotNull('started_at')
-            ->where('started_at', '<', now()->subMinutes($maxMinutes))
+            ->whereNotNull('last_heartbeat_at')
+            ->where('last_heartbeat_at', '<', now()->subMinutes($maxMinutes))
             ->get()
             ->each(function (Task $task) use (&$actions, $maxMinutes): void {
-                $task->markFailed("Task exceeded maximum execution time of {$maxMinutes} minutes.", TaskFailureType::Transient);
+                $task->markFailed("Task made no progress for {$maxMinutes} minutes (no heartbeat).", TaskFailureType::Transient);
                 $actions[] = [
                     'task_id' => $task->id,
                     'action' => 'failed',
-                    'reason' => 'max execution time exceeded',
+                    'reason' => 'stalled: no progress within window',
                 ];
             });
     }

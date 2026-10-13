@@ -13,6 +13,8 @@ return [
     'max_output_lines' => (int) env('AGENT_MAX_OUTPUT_LINES', 500),
     'enable_shell' => filter_var(env('AGENT_ENABLE_SHELL', true), FILTER_VALIDATE_BOOLEAN),
     'enable_web' => filter_var(env('AGENT_ENABLE_WEB', true), FILTER_VALIDATE_BOOLEAN),
+    'enable_facebook' => filter_var(env('AGENT_ENABLE_FACEBOOK', true), FILTER_VALIDATE_BOOLEAN),
+    'enable_instagram' => filter_var(env('AGENT_ENABLE_INSTAGRAM', true), FILTER_VALIDATE_BOOLEAN),
     'temperature' => '0.7',
 
     // Model routing for the task engine.

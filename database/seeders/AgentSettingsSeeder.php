@@ -66,6 +66,20 @@ class AgentSettingsSeeder extends Seeder
                 'description' => 'Allow the agent to access web search tooling.',
             ],
             [
+                'key' => 'enable_facebook',
+                'value' => config('agent.enable_facebook') ? 'true' : 'false',
+                'type' => 'bool',
+                'label' => 'Enable Facebook',
+                'description' => 'Allow the agent to manage a Facebook Page (posts, comments, replies, insights).',
+            ],
+            [
+                'key' => 'enable_instagram',
+                'value' => config('agent.enable_instagram') ? 'true' : 'false',
+                'type' => 'bool',
+                'label' => 'Enable Instagram',
+                'description' => 'Allow the agent to manage an Instagram account (media, comments, replies, publishing, insights).',
+            ],
+            [
                 'key' => 'enable_opencode_guard',
                 'value' => 'true',
                 'type' => 'bool',

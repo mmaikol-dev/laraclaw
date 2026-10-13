@@ -110,7 +110,7 @@ class TaskSupervisorTest extends TestCase
         $this->assertStringContainsString('maximum attempts', $task->fresh()->failure_reason);
     }
 
-    public function test_it_fails_tasks_that_exceed_max_execution_time(): void
+    public function test_it_fails_tasks_that_stop_heartbeating_beyond_the_window(): void
     {
         config(['agent.task.max_execution_minutes' => 1]);
 
@@ -128,6 +128,24 @@ class TaskSupervisorTest extends TestCase
         $this->assertSame(TaskStatus::Failed, $task->fresh()->status);
     }
 
+    public function test_it_does_not_fail_a_long_running_task_that_keeps_progressing(): void
+    {
+        config(['agent.task.max_execution_minutes' => 60]);
+
+        $task = Task::factory()->create([
+            'status' => TaskStatus::Running,
+            'started_at' => now()->subHours(3),
+            'last_heartbeat_at' => now()->subMinute(),
+        ]);
+
+        $supervisor = $this->app->make(TaskSupervisor::class);
+
+        $actions = $supervisor->inspect();
+
+        $this->assertSame([], $actions);
+        $this->assertSame(TaskStatus::Running, $task->fresh()->status);
+    }
+
     public function test_recovering_a_task_with_no_checkpoint_returns_status(): void
     {
         $task = Task::factory()->stale()->create();
@@ -138,5 +156,18 @@ class TaskSupervisorTest extends TestCase
 
         $this->assertSame('recovered', $actions[0]['action']);
         $this->assertSame(TaskStatus::Running, $task->fresh()->status);
+    }
+
+    public function test_recovering_a_stale_task_resets_its_execution_window(): void
+    {
+        $task = Task::factory()->stale()->create();
+
+        $this->assertTrue($task->last_heartbeat_at->lt(now()->subMinutes(5)));
+
+        $supervisor = $this->app->make(TaskSupervisor::class);
+
+        $supervisor->inspect();
+
+        $this->assertTrue($task->fresh()->last_heartbeat_at->gt(now()->subMinute()));
     }
 }
