@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Settings\CredentialsController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use Illuminate\Support\Facades\Route;
@@ -10,6 +11,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('settings/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('settings/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::inertia('settings/agent', 'settings/agent')->name('agent-settings.edit');
+
+    Route::get('settings/credentials', [CredentialsController::class, 'edit'])->name('credentials.edit');
+    Route::put('settings/credentials', [CredentialsController::class, 'update'])->name('credentials.update');
 });
 
 Route::middleware(['auth', 'verified'])->group(function () {

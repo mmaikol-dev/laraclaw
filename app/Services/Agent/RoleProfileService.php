@@ -13,7 +13,11 @@ class RoleProfileService
      */
     public static function defaults(): array
     {
-        $credentialsFile = (string) config('agent.credentials_file', '/tmp/laraclaw/.env');
+        $credentialsFile = (string) config('agent.credentials_file', (function () {
+            $home = getenv('HOME') ?: ($_SERVER['HOME'] ?? null);
+
+            return $home ? rtrim($home, '/').'/.laraclaw/.env' : base_path('.laraclaw/.env');
+        })());
 
         return [
             [

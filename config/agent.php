@@ -1,14 +1,18 @@
 <?php
 
+$home = env('HOME', base_path());
+$base = dirname($home) === '/home' ? $home : base_path();
+
 return [
-    'working_dir' => env('AGENT_WORKING_DIR', '/tmp/laraclaw'),
-    'allowed_paths' => env('AGENT_ALLOWED_PATHS', '/tmp/laraclaw,'.env('HOME', '/tmp/laraclaw')),
+    'working_dir' => env('AGENT_WORKING_DIR', $home.'/.laraclaw/working'),
+    'allowed_paths' => env('AGENT_ALLOWED_PATHS', $home.'/.laraclaw,'.$home.'/.laraclaw/working,'.$home),
     // Plain-text environment file that holds social/API credentials the tools
     // (instagram, facebook, youtube) read from when no token is passed in.
-    'credentials_file' => env('AGENT_CREDENTIALS_FILE', '/tmp/laraclaw/.env'),
+    // Keep this persistent (outside /tmp) so it survives reboots.
+    'credentials_file' => env('AGENT_CREDENTIALS_FILE', $home.'/.laraclaw/.env'),
     // Root of the social-media media library. It contains CLIPPED MEDIA (raw
     // cuts) plus one folder per platform that the clip/copy tools stage into.
-    'media_root' => env('AGENT_MEDIA_ROOT', '/home/atlas/laraclaw-media'),
+    'media_root' => env('AGENT_MEDIA_ROOT', $home.'/laraclaw-media'),
     // Per-clip ffmpeg execution budget, in seconds.
     'media_clip_timeout' => (int) env('AGENT_MEDIA_CLIP_TIMEOUT', 900),
     'home_dir' => env('HOME', '/tmp/laraclaw'),
