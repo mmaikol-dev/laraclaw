@@ -28,6 +28,7 @@ class UpdateAgentSettingsRequest extends FormRequest
             'settings.enable_web' => ['nullable', 'boolean'],
             'settings.enable_facebook' => ['nullable', 'boolean'],
             'settings.enable_instagram' => ['nullable', 'boolean'],
+            'settings.enable_whatsapp' => ['nullable', 'boolean'],
             'settings.enable_opencode_guard' => ['nullable', 'boolean'],
             'settings.mission_auto_scope' => ['nullable', 'boolean'],
             'settings.mission_max_feature_attempts' => ['nullable', 'integer', 'min:1', 'max:50'],

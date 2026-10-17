@@ -1,12 +1,12 @@
 ---
 name: optio
-description: Deleniti officiis sint dolores et ullam amet est.
-category: coding
-created_by: user
+description: Quia dolor in sit delectus vitae minima nisi.
+category: research
+created_by: agent
 version: 1
 is_active: true
 source: database
 dependencies: []
 ---
 
-Cupiditate est molestias inventore iure veritatis. Et qui aut recusandae ipsa. Aut deserunt blanditiis fugit tenetur saepe.
+Explicabo consequatur debitis delectus laudantium ad. Molestiae nulla quia maxime sed.

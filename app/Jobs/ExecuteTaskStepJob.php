@@ -26,11 +26,17 @@ class ExecuteTaskStepJob implements ShouldQueue
 {
     use Queueable;
 
-    public int $timeout = 300;
+    public int $timeout = 3600;
 
     public int $tries = 1;
 
-    public function __construct(public int $taskId) {}
+    public function __construct(public int $taskId)
+    {
+        // Match the worker timeout to the longest a single agent step may run,
+        // otherwise a long (but healthy) step is killed mid-flight, the step is
+        // left Running and the task never continues.
+        $this->timeout = (int) config('agent.task.step_timeout_seconds', 3600);
+    }
 
     public function handle(TaskEngine $engine): void
     {
@@ -45,10 +51,17 @@ class ExecuteTaskStepJob implements ShouldQueue
             return;
         }
 
-        $lock = Cache::lock('task-execute:'.$task->id, 300);
+        // The lock must outlive a full step, or it could expire while the step is
+        // still running and let a second worker execute the same task.
+        $lockTtl = $this->timeout + 60;
+        $lock = Cache::lock('task-execute:'.$task->id, $lockTtl);
 
         if (! $lock->get()) {
-            return; // another worker is already executing this task
+            // Another worker already owns this task and will dispatch the
+            // continuation itself. Dropping here (rather than re-dispatching)
+            // guarantees a step is never executed twice; a worker that died
+            // holding the lock is reclaimed by the supervisor's stale recovery.
+            return;
         }
 
         $shouldFinalize = false;

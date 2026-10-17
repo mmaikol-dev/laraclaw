@@ -6,6 +6,7 @@ use App\Models\Conversation;
 use App\Models\Mission;
 use App\Models\MissionFeature;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\ExecutionScope;
 use App\Services\Agent\MissionService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -59,7 +60,14 @@ class AdvanceMissionJob implements ShouldQueue
         $conversation = $this->ensureConversation($mission);
 
         try {
-            $message = $agent->run($conversation, $prompt, "conversation.{$conversation->id}");
+            $scope = app(ExecutionScope::class);
+            $scope->beginMission($mission);
+
+            try {
+                $message = $agent->run($conversation, $prompt, "conversation.{$conversation->id}");
+            } finally {
+                $scope->end();
+            }
         } catch (\Throwable) {
             // The chain stops here; a failed unit must not silently cascade.
             $this->releaseFeature();

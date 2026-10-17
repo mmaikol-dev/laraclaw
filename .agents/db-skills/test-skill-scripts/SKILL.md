@@ -1,12 +1,12 @@
 ---
 name: test-skill-scripts
-description: Eos sint ipsam reprehenderit cum sunt fugiat.
-category: analysis
-created_by: user
+description: Velit quia non quo asperiores iure fugit.
+category: general
+created_by: agent
 version: 1
 is_active: true
 source: database
 dependencies: []
 ---
 
-Similique dolorum eum quibusdam consequatur iure. Enim expedita voluptas est voluptatem dolores ab. Et suscipit corporis expedita quasi tempora est doloribus officia. Ipsa veritatis pariatur doloribus aliquam eos.
+Enim quam libero quasi dolor autem. Cum ut quia in eos fugit. Molestiae dolorem eos iusto quia. Delectus nostrum nemo vitae voluptatem.

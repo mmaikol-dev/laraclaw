@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\TaskFailureType;
 use App\Enums\TaskStatus;
 use App\Enums\TaskStepStatus;
 use App\Models\AgentRoleProfile;
@@ -169,6 +170,82 @@ class TaskEngineTest extends TestCase
 
         $this->assertSame(TaskStatus::Failed, $task->status);
         $this->assertNotNull($task->failure_reason);
+    }
+
+    public function test_execute_parks_the_task_when_a_step_fails_non_retryably(): void
+    {
+        $agent = Mockery::mock(AgentService::class);
+        $agent->shouldReceive('run')->andReturnUsing(function (): Message {
+            $message = new Message;
+            $message->content = 'LaraClaw could not complete this step: permission denied.';
+
+            return $message;
+        });
+        $agent->shouldReceive('chatRaw')->andReturn('STEP: Do the thing');
+
+        $engine = new TaskEngine(
+            $this->app->make(ToolRegistry::class),
+            $this->app->make(ModelRouter::class),
+            $this->app->make(FailureClassifier::class),
+            $this->app->make(LoopDetector::class),
+            $this->app->make(VerificationService::class),
+            $agent,
+            $this->app->make(SpecialistAgents::class),
+            $this->app->make(TaskContext::class),
+            new OutcomeRecorder,
+            $this->app->make(RoleProfileService::class),
+        );
+
+        $task = Task::factory()->create(['goal' => 'Fix the broken login']);
+        $engine->plan($task);
+        $task->refresh();
+
+        $engine->execute($task);
+        $task->refresh();
+
+        $this->assertSame(TaskStatus::Waiting, $task->status);
+        $this->assertTrue((bool) $task->needs_human_input);
+        $this->assertSame(TaskFailureType::PermissionError, $task->failure_type);
+        $this->assertSame('human_input', $task->resume_condition['type'] ?? null);
+    }
+
+    public function test_execute_parks_the_task_when_a_401_surfaces_mid_retry(): void
+    {
+        $attempt = 0;
+        $agent = Mockery::mock(AgentService::class);
+        $agent->shouldReceive('run')->andReturnUsing(function () use (&$attempt): Message {
+            $message = new Message;
+            $message->content = ++$attempt === 1
+                ? 'LaraClaw could not complete this step: Ollama model overloaded.'
+                : 'LaraClaw could not complete this step: Ollama chat stream failed with status 401.';
+
+            return $message;
+        });
+        $agent->shouldReceive('chatRaw')->andReturn('STEP: Do the thing');
+
+        $engine = new TaskEngine(
+            $this->app->make(ToolRegistry::class),
+            $this->app->make(ModelRouter::class),
+            $this->app->make(FailureClassifier::class),
+            $this->app->make(LoopDetector::class),
+            $this->app->make(VerificationService::class),
+            $agent,
+            $this->app->make(SpecialistAgents::class),
+            $this->app->make(TaskContext::class),
+            new OutcomeRecorder,
+            $this->app->make(RoleProfileService::class),
+        );
+
+        $task = Task::factory()->create(['goal' => 'Upload the clips to YouTube']);
+        $engine->plan($task);
+        $task->refresh();
+
+        $engine->execute($task);
+        $task->refresh();
+
+        $this->assertSame(TaskStatus::Waiting, $task->status);
+        $this->assertTrue((bool) $task->needs_human_input);
+        $this->assertSame(TaskFailureType::PermissionError, $task->failure_type);
     }
 
     public function test_resume_continues_from_the_latest_checkpoint(): void

@@ -30,12 +30,10 @@ class TaskSupervisor
     {
         $actions = [];
 
-        // 1. Progress-aware stuck detection. A task that has made no progress
-        //    (no heartbeat) within the execution window is genuinely stuck.
-        //    Long-running tasks that keep heartbeating are never failed here.
-        //    Runs before recovery so a genuinely stuck task is failed rather
-        //    than recovered with a freshly reset heartbeat.
-        $this->detectStuckSteps($actions);
+        // 1. In-flight heartbeat. A step that is still executing keeps its task
+        //    alive for the duration of its timeout, so a legitimately long agent
+        //    turn is never mistaken for a stalled task and spuriously recovered.
+        $this->refreshInFlightHeartbeats();
 
         // 2. Tasks with excessive attempts (should be escalated or failed by engine, but guard here)
         $max = (int) config('agent.task.max_attempts', 5);
@@ -79,11 +77,32 @@ class TaskSupervisor
     /**
      * Recover a single stale task and re-queue it for automatic continuation.
      *
+     * Recovery is bounded: once a task has been auto-recovered
+     * `max_auto_recoveries` times in a row without making progress, it is parked
+     * for human input instead of being restarted again. This stops the agent
+     * from burning work on a task that is genuinely stuck.
+     *
      * @return array<string, mixed>
      */
     public function recoverStale(Task $task): array
     {
-        $recovery = $this->engine->recover($task);
+        $max = (int) config('agent.task.max_auto_recoveries', 3);
+
+        if ($task->auto_recoveries >= $max) {
+            $this->engine->park(
+                $task,
+                "Task stalled {$task->auto_recoveries} times without making progress. Awaiting human input before restarting.",
+                TaskFailureType::Unrecoverable,
+            );
+
+            return [
+                'task_id' => $task->id,
+                'action' => 'parked_needs_human',
+                'reason' => 'exceeded max auto-recoveries ('.$max.')',
+            ];
+        }
+
+        $recovery = $this->engine->recover($task, null, automatic: true);
 
         ExecuteTaskStepJob::dispatch($task->id);
 
@@ -125,29 +144,20 @@ class TaskSupervisor
     }
 
     /**
-     * Detect tasks that have made no progress (no heartbeat) within the
-     * execution window. This is progress-aware: a task may run for hours as
-     * long as it keeps heartbeating at each step, and is only failed once it
-     * has been silent for the full window.
-     *
-     * @param  array<int, array<string, mixed>>  $actions
+     * Keep the heartbeat fresh for tasks whose current step is still executing
+     * within its allowed window. This is the in-flight heartbeat: without it a
+     * step that runs longer than the stale grace period would be flagged as
+     * stalled and recovered while it is still making progress.
      */
-    private function detectStuckSteps(array &$actions): void
+    private function refreshInFlightHeartbeats(): void
     {
-        $maxMinutes = (int) config('agent.task.max_execution_minutes', 60);
-
         Task::query()
             ->whereIn('status', [TaskStatus::Running, TaskStatus::Retrying])
-            ->whereNotNull('last_heartbeat_at')
-            ->where('last_heartbeat_at', '<', now()->subMinutes($maxMinutes))
             ->get()
-            ->each(function (Task $task) use (&$actions, $maxMinutes): void {
-                $task->markFailed("Task made no progress for {$maxMinutes} minutes (no heartbeat).", TaskFailureType::Transient);
-                $actions[] = [
-                    'task_id' => $task->id,
-                    'action' => 'failed',
-                    'reason' => 'stalled: no progress within window',
-                ];
+            ->each(function (Task $task): void {
+                if ($task->hasInFlightStep()) {
+                    $task->touchHeartbeat();
+                }
             });
     }
 }

@@ -49,10 +49,12 @@
             "npm run build"
         ],
         "dev": [
+            "@php -r \"exec('lsof -ti tcp:8100 | xargs -r kill 2>/dev/null'); usleep(300000);\"",
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#86efac\" \"php artisan serve --port=8100 --no-reload\" \"php artisan queue:listen --queue=default,tasks --tries=1 --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" \"php artisan schedule:work\" --names=server,queue,logs,vite,sched --kill-others"
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#86efac,#fca5a5\" \"php artisan serve --port=8100 --no-reload\" \"php artisan queue:listen --queue=default,tasks --tries=1 --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" \"php artisan schedule:work\" \"sh -c 'HERMES3D_DIR=\\${HERMES3D_DIR:-\\$HOME/projects/Hermes3D}; if [ -f \\$HERMES3D_DIR/package.json ]; then lsof -ti tcp:3000 2>/dev/null | xargs -r kill 2>/dev/null; cd \\$HERMES3D_DIR && exec npm run dev; else echo hermes3d not found at \\$HERMES3D_DIR; exec sleep infinity; fi'\" --names=server,queue,logs,vite,sched,hermes --kill-others"
         ],
         "dev:ssr": [
+            "@php -r \"exec('lsof -ti tcp:8100 | xargs -r kill 2>/dev/null'); usleep(300000);\"",
             "npm run build:ssr",
             "Composer\\Config::disableProcessTimeout",
             "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve --port=8100 --no-reload\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"php artisan inertia:start-ssr\" --names=server,queue,logs,ssr --kill-others"

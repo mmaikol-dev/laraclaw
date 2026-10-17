@@ -19,6 +19,7 @@ use App\Services\Agent\AgentOrchestrator;
 use App\Services\Agent\AgentService;
 use App\Services\TaskEngine\SpecialistAgents;
 use App\Services\TaskEngine\SpecialistProfile;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -314,19 +315,48 @@ class Hermes3dRuntimeController extends Controller
     {
         $furniture = [];
 
-        foreach ($deskSlugs as $index => $slug) {
+        $gridSlugs = array_values(array_filter(
+            array_map('strval', $deskSlugs),
+            fn (string $slug): bool => $slug !== 'server_operator',
+        ));
+
+        foreach ($gridSlugs as $index => $slug) {
             $column = $index % 6;
             $row = intdiv($index, 6);
 
             $furniture = array_merge(
                 $furniture,
-                $this->deskFurniture((string) $slug, 100 + $column * 200, 300 + $row * 200),
+                $this->deskFurniture($slug, 100 + $column * 200, 300 + $row * 200),
             );
         }
 
         $furniture = array_merge($furniture, $this->deskFurniture('scheduler', 740, 60));
 
+        if (in_array('server_operator', array_map('strval', $deskSlugs), true)) {
+            $furniture = array_merge($furniture, $this->serverRoomFurniture());
+        }
+
         return array_merge($furniture, $this->lobbyFurniture());
+    }
+
+    /**
+     * The server room: the Server Operator's desk surrounded by the racks and
+     * console it supervises, so Docker/Cloudflare-driven hosting work reads as
+     * a distinct space in the office.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function serverRoomFurniture(): array
+    {
+        return array_merge($this->deskFurniture('server_operator', 1400, 430), [
+            ['_uid' => 'server-room-rack-1', 'type' => 'server_rack', 'x' => 1300, 'y' => 120, 'facing' => 180],
+            ['_uid' => 'server-room-rack-2', 'type' => 'server_rack', 'x' => 1420, 'y' => 120, 'facing' => 180],
+            ['_uid' => 'server-room-rack-3', 'type' => 'server_rack', 'x' => 1540, 'y' => 120, 'facing' => 180],
+            ['_uid' => 'server-room-terminal', 'type' => 'server_terminal', 'x' => 1420, 'y' => 220, 'facing' => 0],
+            ['_uid' => 'server-room-device-rack', 'type' => 'device_rack', 'x' => 1660, 'y' => 120, 'facing' => 180],
+            ['_uid' => 'server-room-cooling', 'type' => 'water_cooler', 'x' => 1290, 'y' => 240],
+            ['_uid' => 'server-room-plant', 'type' => 'plant', 'x' => 1710, 'y' => 250],
+        ]);
     }
 
     /**
@@ -416,7 +446,7 @@ class Hermes3dRuntimeController extends Controller
      */
     private function taskOfficeStates(): array
     {
-        $recentFailure = now()->subMinutes(5);
+        $recentFailure = $this->recentFailureCutoff();
 
         $tasks = Task::query()
             ->whereIn('status', [
@@ -483,6 +513,12 @@ class Hermes3dRuntimeController extends Controller
                 TaskStepStatus::Running->value,
                 TaskStepStatus::Retrying->value,
             ])
+            ->whereHas('task', function (Builder $query): void {
+                $query->where(function (Builder $inner): void {
+                    $inner->where('status', '!=', TaskStatus::Failed->value)
+                        ->orWhere('completed_at', '>=', $this->recentFailureCutoff());
+                });
+            })
             ->with(['task' => fn ($query) => $query->select('id', 'status', 'goal')])
             ->orderBy('sort_order')
             ->get(['id', 'task_id', 'status', 'description', 'prompt']);
@@ -619,6 +655,15 @@ class Hermes3dRuntimeController extends Controller
             ->pluck('id', 'slug')
             ->map(fn ($id): int => (int) $id)
             ->all();
+    }
+
+    /**
+     * A failed task only reads as an office error while it is fresh: once the
+     * window passes, its leftover steps must stop painting specialists red.
+     */
+    private function recentFailureCutoff(): CarbonInterface
+    {
+        return now()->subMinutes(5);
     }
 
     private function officeStateForTask(TaskStatus $status): string

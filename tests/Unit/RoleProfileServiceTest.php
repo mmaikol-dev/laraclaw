@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\AgentRoleProfile;
 use App\Models\Conversation;
 use App\Services\Agent\RoleProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -18,7 +19,7 @@ class RoleProfileServiceTest extends TestCase
         ]);
 
         $service = new RoleProfileService;
-        $profile = $service->resolveForConversation($conversation, 'Debug the Docker deployment and queue worker.');
+        $profile = $service->resolveForConversation($conversation, 'Debug the deployment pipeline and queue worker.');
 
         $conversation->refresh();
 
@@ -27,6 +28,33 @@ class RoleProfileServiceTest extends TestCase
         $this->assertSame('DevOps Operator', $conversation->identity_label);
         $this->assertDatabaseHas('agent_role_profiles', [
             'slug' => 'laravel_architect',
+        ]);
+    }
+
+    public function test_it_routes_server_room_work_to_the_server_operator(): void
+    {
+        $service = new RoleProfileService;
+        $service->ensureDefaults();
+
+        foreach ([
+            'spin up a docker container for the new site',
+            'point cloudflare dns at the new host',
+            'expose the app through a cloudflare tunnel',
+            'self-host the docs site on the vps',
+        ] as $message) {
+            $conversation = Conversation::query()->create(['title' => $message]);
+            $profile = $service->resolveForConversation($conversation, $message);
+
+            $this->assertSame(
+                'server_operator',
+                $profile?->slug,
+                "Server-room work ({$message}) must route to the Server Operator.",
+            );
+        }
+
+        $this->assertDatabaseHas('agent_role_profiles', [
+            'slug' => 'server_operator',
+            'name' => 'Server Operator',
         ]);
     }
 
@@ -96,5 +124,66 @@ class RoleProfileServiceTest extends TestCase
         $this->assertStringContainsString('Active role profile: Security Auditor', $context);
         $this->assertStringContainsString('Escalation rules:', $context);
         $this->assertStringContainsString('Preferred tools:', $context);
+    }
+
+    public function test_it_routes_social_platform_work_to_the_matching_specialist(): void
+    {
+        $service = new RoleProfileService;
+        $service->ensureDefaults();
+
+        $cases = [
+            'instagram_specialist' => 'write an instagram caption for the new reel',
+            'facebook_specialist' => 'schedule a facebook post for the page',
+            'youtube_specialist' => 'upload this video to youtube',
+            'whatsapp_specialist' => 'send a whatsapp message to the team',
+        ];
+
+        foreach ($cases as $slug => $message) {
+            $conversation = Conversation::query()->create(['title' => $message]);
+            $profile = $service->resolveForConversation($conversation, $message);
+
+            $this->assertSame($slug, $profile?->slug, "Message ({$message}) must route to {$slug}.");
+        }
+
+        $this->assertDatabaseHas('agent_role_profiles', ['slug' => 'instagram_specialist', 'name' => 'Instagram Specialist']);
+        $this->assertDatabaseHas('agent_role_profiles', ['slug' => 'facebook_specialist', 'name' => 'Facebook Specialist']);
+        $this->assertDatabaseHas('agent_role_profiles', ['slug' => 'youtube_specialist', 'name' => 'YouTube Specialist']);
+        $this->assertDatabaseHas('agent_role_profiles', ['slug' => 'whatsapp_specialist', 'name' => 'WhatsApp Specialist']);
+    }
+
+    public function test_server_room_work_still_wins_over_whatsapp(): void
+    {
+        $service = new RoleProfileService;
+        $service->ensureDefaults();
+
+        foreach ([
+            'restart the whatsapp container',
+            'check the docker whatsapp server logs',
+        ] as $message) {
+            $conversation = Conversation::query()->create(['title' => $message]);
+            $profile = $service->resolveForConversation($conversation, $message);
+
+            $this->assertSame(
+                'server_operator',
+                $profile?->slug,
+                "Infrastructure work ({$message}) must stay with the Server Operator, not the WhatsApp Specialist.",
+            );
+        }
+    }
+
+    public function test_social_specialist_prompts_reference_their_skill_and_the_credentials_file(): void
+    {
+        (new RoleProfileService)->ensureDefaults();
+
+        foreach ([
+            'instagram_specialist' => ['instagram-operations', 'INSTAGRAM_ACCESS_TOKEN'],
+            'facebook_specialist' => ['facebook-operations', 'FACEBOOK_ACCESS_TOKEN'],
+            'youtube_specialist' => ['youtube-operations', 'YOUTUBE_REFRESH_TOKEN'],
+        ] as $slug => [$skill, $key]) {
+            $profile = AgentRoleProfile::query()->where('slug', $slug)->firstOrFail();
+            $this->assertStringContainsString($skill, $profile->system_prompt);
+            $this->assertStringContainsString($key, $profile->system_prompt);
+            $this->assertStringContainsString(config('agent.credentials_file'), $profile->system_prompt);
+        }
     }
 }

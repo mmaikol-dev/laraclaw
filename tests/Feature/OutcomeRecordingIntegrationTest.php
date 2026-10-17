@@ -85,7 +85,10 @@ class OutcomeRecordingIntegrationTest extends TestCase
 
         $this->runTask($task);
 
-        $this->assertSame(TaskStatus::Failed, $task->fresh()->status);
+        // A verification failure that never passes is non-retryable: the task is
+        // parked for human input, but the run still records exactly one outcome.
+        $this->assertSame(TaskStatus::Waiting, $task->fresh()->status);
+        $this->assertTrue((bool) $task->fresh()->needs_human_input);
 
         $outcomes = AgentRunOutcome::query()->where('subject_id', $task->id)->get();
         $this->assertCount(1, $outcomes);

@@ -1,7 +1,7 @@
 ---
 name: existing-skill
-description: Doloribus molestiae ea qui quia at veritatis ipsam debitis.
-category: data
+description: Quibusdam ad in exercitationem similique sunt.
+category: coding
 created_by: agent
 version: 
 is_active: true
@@ -9,4 +9,4 @@ source: database
 dependencies: []
 ---
 
-Ut quae molestiae adipisci necessitatibus ad sed dolorem. Blanditiis ad ut recusandae laboriosam provident eaque perspiciatis temporibus. Dicta incidunt in ut quis eum. Recusandae hic necessitatibus laborum dignissimos error quis est.
+Voluptatum ut fugit quam quos qui sit. Ut explicabo fugit eaque accusamus velit porro et. Ut et sapiente officiis dolorem dolorum quibusdam. Id est ipsam corrupti rem veniam fuga error suscipit.

@@ -1,4 +1,4 @@
-import { Head, usePoll } from '@inertiajs/react';
+import { Head, router, usePoll } from '@inertiajs/react';
 import {
     ChevronDown,
     CircleCheck,
@@ -8,14 +8,21 @@ import {
     FileCheck2,
     GitCommitHorizontal,
     ListChecks,
+    LoaderCircle,
     Rocket,
     ShieldAlert,
+    ShieldCheck,
     Sparkles,
     Terminal,
     UserCog,
 } from 'lucide-react';
 import { useState } from 'react';
+import {
+    approveSudo,
+    denySudo,
+} from '@/actions/App/Http/Controllers/MissionController';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import AppLayout from '@/layouts/app-layout';
 import { index as missionsRoute } from '@/routes/missions';
 import type { BreadcrumbItem } from '@/types';
@@ -54,6 +61,8 @@ type Mission = {
     milestone_count: number;
     context_notes: string | null;
     spent_tokens: number;
+    sudo_status: 'none' | 'requested' | 'approved' | 'denied';
+    sudo_reason: string | null;
     features: MissionFeature[];
     handoffs: MissionHandoff[];
 };
@@ -151,8 +160,18 @@ export default function MissionsIndex({
     opencodeModels,
 }: Props) {
     const [expandedId, setExpandedId] = useState<number | null>(null);
+    const [sudoBusy, setSudoBusy] = useState<string | null>(null);
 
     usePoll(8000, { only: ['missions'] });
+
+    function resolveSudo(missionId: number, action: 'approve' | 'deny'): void {
+        setSudoBusy(`${missionId}:${action}`);
+
+        const definition =
+            action === 'approve' ? approveSudo(missionId) : denySudo(missionId);
+
+        router.post(definition.url, {}, { onFinish: () => setSudoBusy(null) });
+    }
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -306,6 +325,64 @@ export default function MissionsIndex({
                                             )}
                                         </div>
                                     </button>
+
+                                    {mission.sudo_status === 'requested' && (
+                                        <div className="flex flex-wrap items-center gap-2 border-t bg-amber-50/50 px-4 py-3 dark:bg-amber-950/20">
+                                            <ShieldAlert className="size-4 text-amber-600" />
+                                            <span className="text-sm">
+                                                Sudo permission requested
+                                                {mission.sudo_reason
+                                                    ? `: ${mission.sudo_reason}`
+                                                    : ''}
+                                            </span>
+                                            <div className="ml-auto flex gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() =>
+                                                        resolveSudo(
+                                                            mission.id,
+                                                            'approve',
+                                                        )
+                                                    }
+                                                    disabled={sudoBusy !== null}
+                                                >
+                                                    {sudoBusy ===
+                                                    `${mission.id}:approve` ? (
+                                                        <LoaderCircle className="size-4 animate-spin" />
+                                                    ) : (
+                                                        <ShieldCheck className="size-4" />
+                                                    )}
+                                                    Approve sudo
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                        resolveSudo(
+                                                            mission.id,
+                                                            'deny',
+                                                        )
+                                                    }
+                                                    disabled={sudoBusy !== null}
+                                                >
+                                                    {sudoBusy ===
+                                                    `${mission.id}:deny` ? (
+                                                        <LoaderCircle className="size-4 animate-spin" />
+                                                    ) : (
+                                                        <ShieldAlert className="size-4" />
+                                                    )}
+                                                    Deny
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {mission.sudo_status === 'approved' && (
+                                        <div className="flex items-center gap-2 border-t px-4 py-2 text-xs text-emerald-600">
+                                            <ShieldCheck className="size-3.5" />
+                                            Sudo approved for this mission
+                                        </div>
+                                    )}
 
                                     {expanded && (
                                         <div className="space-y-4 border-t px-4 py-4">

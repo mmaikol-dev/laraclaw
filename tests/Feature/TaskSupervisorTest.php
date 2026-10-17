@@ -110,10 +110,8 @@ class TaskSupervisorTest extends TestCase
         $this->assertStringContainsString('maximum attempts', $task->fresh()->failure_reason);
     }
 
-    public function test_it_fails_tasks_that_stop_heartbeating_beyond_the_window(): void
+    public function test_it_recovers_a_task_that_stops_heartbeating_instead_of_failing_it(): void
     {
-        config(['agent.task.max_execution_minutes' => 1]);
-
         $task = Task::factory()->create([
             'status' => TaskStatus::Running,
             'started_at' => now()->subMinutes(30),
@@ -125,13 +123,64 @@ class TaskSupervisorTest extends TestCase
         $actions = $supervisor->inspect();
 
         $this->assertNotEmpty($actions);
-        $this->assertSame(TaskStatus::Failed, $task->fresh()->status);
+        $this->assertSame('recovered', $actions[0]['action']);
+        $this->assertSame(TaskStatus::Running, $task->fresh()->status);
+        $this->assertSame(1, $task->fresh()->auto_recoveries);
+    }
+
+    public function test_it_does_not_recover_a_task_whose_step_is_still_running(): void
+    {
+        $task = Task::factory()->create([
+            'status' => TaskStatus::Running,
+            'started_at' => now()->subHour(),
+            // Heartbeat is older than the stale grace period, but the step that
+            // owns the task is still executing inside its timeout window.
+            'last_heartbeat_at' => now()->subMinutes(5),
+        ]);
+
+        $task->steps()->create([
+            'sort_order' => 1,
+            'status' => 'running',
+            'description' => 'Long OpenCode turn',
+            'started_at' => now()->subMinutes(5),
+        ]);
+
+        $supervisor = $this->app->make(TaskSupervisor::class);
+
+        $actions = $supervisor->inspect();
+
+        $this->assertSame([], $actions);
+        $this->assertSame(TaskStatus::Running, $task->fresh()->status);
+        $this->assertTrue($task->fresh()->last_heartbeat_at->gt(now()->subMinute()));
+    }
+
+    public function test_it_recovers_a_task_whose_running_step_exceeded_its_timeout(): void
+    {
+        config(['agent.task.step_timeout_seconds' => 60]);
+
+        $task = Task::factory()->create([
+            'status' => TaskStatus::Running,
+            'started_at' => now()->subHour(),
+            'last_heartbeat_at' => now()->subMinutes(5),
+        ]);
+
+        $task->steps()->create([
+            'sort_order' => 1,
+            'status' => 'running',
+            'description' => 'Dead OpenCode turn',
+            'started_at' => now()->subMinutes(30),
+        ]);
+
+        $supervisor = $this->app->make(TaskSupervisor::class);
+
+        $actions = $supervisor->inspect();
+
+        $this->assertSame('recovered', $actions[0]['action']);
+        $this->assertSame(TaskStatus::Running, $task->fresh()->status);
     }
 
     public function test_it_does_not_fail_a_long_running_task_that_keeps_progressing(): void
     {
-        config(['agent.task.max_execution_minutes' => 60]);
-
         $task = Task::factory()->create([
             'status' => TaskStatus::Running,
             'started_at' => now()->subHours(3),
@@ -169,5 +218,38 @@ class TaskSupervisorTest extends TestCase
         $supervisor->inspect();
 
         $this->assertTrue($task->fresh()->last_heartbeat_at->gt(now()->subMinute()));
+    }
+
+    public function test_automatic_recovery_consumes_the_bounded_budget(): void
+    {
+        $task = Task::factory()->stale()->create(['auto_recoveries' => 0]);
+
+        $supervisor = $this->app->make(TaskSupervisor::class);
+
+        $supervisor->inspect();
+
+        $this->assertSame(1, $task->fresh()->auto_recoveries);
+        $this->assertSame(TaskStatus::Running, $task->fresh()->status);
+    }
+
+    public function test_it_parks_a_stale_task_once_the_recovery_budget_is_spent(): void
+    {
+        config(['agent.task.max_auto_recoveries' => 2]);
+
+        $task = Task::factory()->stale()->create(['auto_recoveries' => 2]);
+
+        $supervisor = $this->app->make(TaskSupervisor::class);
+
+        $actions = $supervisor->inspect();
+
+        $this->assertSame('parked_needs_human', $actions[0]['action']);
+        $this->assertSame($task->id, $actions[0]['task_id']);
+
+        $task->refresh();
+        $this->assertSame(TaskStatus::Waiting, $task->status);
+        $this->assertTrue((bool) $task->needs_human_input);
+        $this->assertStringContainsString('Awaiting human input', $task->waiting_reason);
+
+        Queue::assertNotPushed(ExecuteTaskStepJob::class);
     }
 }

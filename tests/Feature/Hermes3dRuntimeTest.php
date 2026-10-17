@@ -171,6 +171,30 @@ class Hermes3dRuntimeTest extends TestCase
         });
     }
 
+    public function test_layout_builds_a_server_room_for_the_server_operator(): void
+    {
+        $this->activeProfile('server_operator', 'Server Operator');
+
+        $furniture = collect($this->getJson('/api/hermes3d/layout')->assertOk()->json('furniture'));
+
+        $this->assertContains('desk-server_operator', $this->layoutDeskIds());
+        $this->assertSame(3, $furniture->where('type', 'server_rack')->count());
+        $this->assertSame(1, $furniture->where('type', 'server_terminal')->count());
+
+        $agents = $this->presenceAgents();
+        $this->assertSame('desk-server_operator', $agents['server_operator']['preferredDeskId']);
+    }
+
+    public function test_layout_has_no_server_room_when_the_server_operator_is_absent(): void
+    {
+        $this->activeProfile('devops_operator', 'DevOps Operator');
+
+        $furniture = collect($this->getJson('/api/hermes3d/layout')->assertOk()->json('furniture'));
+
+        $this->assertSame(0, $furniture->where('type', 'server_rack')->count());
+        $this->assertNotContains('desk-server_operator', $this->layoutDeskIds());
+    }
+
     public function test_presence_preferred_desk_id_matches_a_layout_desk(): void
     {
         $this->activeProfile('devops_operator', 'DevOps Operator');
@@ -320,6 +344,39 @@ class Hermes3dRuntimeTest extends TestCase
         $this->assertSame('idle', $agents['specialist-coder']['state']);
     }
 
+    public function test_presence_marks_a_specialist_error_for_a_recent_failure(): void
+    {
+        $task = Task::factory()->failed()->create(['goal' => 'Improve the checkout flow']);
+
+        $task->steps()->create([
+            'sort_order' => 1,
+            'status' => TaskStepStatus::Pending,
+            'description' => 'Review the pull request for regressions',
+        ]);
+
+        $agents = $this->presenceAgents();
+
+        $this->assertSame('error', $agents['specialist-reviewer']['state']);
+    }
+
+    public function test_presence_clears_a_specialist_error_once_a_failed_task_is_stale(): void
+    {
+        $task = Task::factory()->failed()->create([
+            'goal' => 'Improve the checkout flow',
+            'completed_at' => now()->subMinutes(10),
+        ]);
+
+        $task->steps()->create([
+            'sort_order' => 1,
+            'status' => TaskStepStatus::Pending,
+            'description' => 'Review the pull request for regressions',
+        ]);
+
+        $agents = $this->presenceAgents();
+
+        $this->assertSame('idle', $agents['specialist-reviewer']['state']);
+    }
+
     public function test_presence_marks_the_planner_working_while_a_task_is_planning(): void
     {
         Task::factory()->create(['status' => TaskStatus::Planning]);
@@ -368,7 +425,7 @@ class Hermes3dRuntimeTest extends TestCase
         $mission = Mission::factory()->create(['status' => 'active']);
         $feature = $mission->features()->create([
             'title' => 'Deploy the new service to the server',
-            'description' => 'Docker and queue setup.',
+            'description' => 'Queue and pipeline setup.',
             'status' => 'in_progress',
             'sort_order' => 1,
         ]);

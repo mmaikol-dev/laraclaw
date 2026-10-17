@@ -2,14 +2,19 @@
 
 namespace Tests\Unit;
 
+use App\Models\MediaAsset;
 use App\Services\Agent\ToolRegistry;
 use App\Services\Tools\InstagramTool;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Tests\TestCase;
 
 class InstagramToolTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_the_instagram_tool_is_registered(): void
     {
         $this->assertInstanceOf(InstagramTool::class, app(ToolRegistry::class)->get('instagram'));
@@ -142,6 +147,28 @@ class InstagramToolTest extends TestCase
 
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/ig-account-1/media_publish')
             && $request['creation_id'] === 'container-1');
+    }
+
+    public function test_publishing_marks_the_named_clip_as_posted(): void
+    {
+        $asset = MediaAsset::factory()->create(['slug' => 'promo-clip', 'status' => MediaAsset::STATUS_UNPOSTED]);
+
+        Http::fake([
+            'graph.facebook.com/*/ig-account-1/media_publish*' => Http::response(['id' => 'ig-media-9']),
+        ]);
+
+        (new InstagramTool)->execute([
+            'action' => 'publish',
+            'access_token' => 'test-instagram-token',
+            'account_id' => 'ig-account-1',
+            'creation_id' => 'container-1',
+            'asset' => 'promo-clip',
+        ]);
+
+        $asset->refresh();
+        $this->assertSame(MediaAsset::STATUS_POSTED, $asset->status);
+        $this->assertSame('instagram', $asset->platform);
+        $this->assertSame('ig-media-9', $asset->external_id);
     }
 
     public function test_it_reads_media_insights(): void
@@ -410,5 +437,33 @@ class InstagramToolTest extends TestCase
             'action' => 'explode',
             'access_token' => 'test-instagram-token',
         ]);
+    }
+
+    public function test_it_reads_credentials_from_the_credentials_file(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'ig-creds-');
+        file_put_contents($file, "INSTAGRAM_ACCESS_TOKEN=token-from-file\nINSTAGRAM_ACCOUNT_ID=account-from-file\n");
+        config()->set('agent.credentials_file', $file);
+
+        Http::fake([
+            'graph.facebook.com/*/account-from-file*' => Http::response(['id' => 'account-from-file', 'username' => 'brandx']),
+        ]);
+
+        try {
+            $result = (new InstagramTool)->execute(['action' => 'account']);
+        } finally {
+            @unlink($file);
+        }
+
+        $this->assertStringContainsString('@brandx', $result);
+        Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer token-from-file'));
+    }
+
+    public function test_the_tool_description_points_at_the_credentials_file(): void
+    {
+        $description = (new InstagramTool)->getDescription();
+
+        $this->assertStringContainsString(config('agent.credentials_file'), $description);
+        $this->assertStringContainsString('INSTAGRAM_ACCESS_TOKEN', $description);
     }
 }

@@ -23,7 +23,8 @@ class FailureClassifier
      */
     private const PERMISSION_PATTERNS = [
         'permission denied', 'not allowed', 'denied', 'forbidden', 'unauthorized',
-        'access denied', 'blocked', 'no read', 'no write',
+        'unauthenticated', 'access denied', 'blocked', 'no read', 'no write',
+        'status 401', 'status 403', 'http 401', 'http 403',
     ];
 
     public function classify(string $error, ?string $toolName = null): TaskFailureType

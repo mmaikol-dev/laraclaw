@@ -20,7 +20,8 @@ class FacebookTool extends BaseTool
 
     public function getDescription(): string
     {
-        return 'Manage a Facebook Page through the Meta Graph API: read the page and its posts, publish and delete posts, read comments, comment on posts, reply to comments, hide or delete comments, like or unlike posts/comments, and read page insights. Actions: page, list_posts, get_post, create_post, delete_post, list_comments, comment, reply, delete_comment, hide_comment, like, unlike, insights. Pass access_token (a system user / admin token with access to the page) and page_id from your stored credentials (memory) with every call. Read actions use the token directly; write actions (create_post, delete_post, comment, reply, delete_comment, hide_comment, like, unlike) first exchange it via the /me/accounts endpoint to obtain the Page Access Token for page_id.';
+        return 'Manage a Facebook Page through the Meta Graph API: read the page and its posts, publish and delete posts, read comments, comment on posts, reply to comments, hide or delete comments, like or unlike posts/comments, and read page insights. Actions: page, list_posts, get_post, create_post, delete_post, list_comments, comment, reply, delete_comment, hide_comment, like, unlike, insights. '
+            .CredentialsFile::hint().' (keys: FACEBOOK_ACCESS_TOKEN, FACEBOOK_PAGE_ID). Pass access_token (a system user / admin token with access to the page) and page_id with the call, or omit them and the tool reads them from that file. Never print, log, or paste the token. Read actions use the token directly; write actions (create_post, delete_post, comment, reply, delete_comment, hide_comment, like, unlike) first exchange it via the /me/accounts endpoint to obtain the Page Access Token for page_id.';
     }
 
     public function getParameters(): array
@@ -37,20 +38,21 @@ class FacebookTool extends BaseTool
                     ],
                     'description' => 'The Facebook operation to perform.',
                 ],
-                'access_token' => ['type' => 'string', 'description' => 'Facebook access token with access to the target page (system user or admin token that can list pages via /me/accounts). Recall the stored token from your memory and pass it here each call.'],
-                'page_id' => ['type' => 'string', 'description' => 'Facebook Page ID. Recall the stored page ID from your memory and pass it here each call.'],
+                'access_token' => ['type' => 'string', 'description' => 'Facebook access token with access to the target page (system user or admin token that can list pages via /me/accounts). Optional: defaults to FACEBOOK_ACCESS_TOKEN in the credentials file ('.CredentialsFile::path().').'],
+                'page_id' => ['type' => 'string', 'description' => 'Facebook Page ID. Optional: defaults to FACEBOOK_PAGE_ID in the credentials file ('.CredentialsFile::path().').'],
                 'post_id' => ['type' => 'string', 'description' => 'Post ID (get_post, delete_post, or as the target object).'],
                 'object_id' => ['type' => 'string', 'description' => 'Object to act on — a post or comment ID (list_comments, comment, like, unlike). Falls back to post_id.'],
                 'comment_id' => ['type' => 'string', 'description' => 'Comment ID (reply, delete_comment, hide_comment).'],
                 'message' => ['type' => 'string', 'description' => 'Text used by create_post, comment, and reply.'],
                 'link' => ['type' => 'string', 'description' => 'Optional URL to attach when creating a post.'],
+                'asset' => ['type' => 'string', 'description' => 'Optional media-library clip (slug or filename) this post publishes. When set, a successful create_post marks that clip as posted so it is not posted twice. Check media_clip action=library for unposted clips.'],
                 'limit' => ['type' => 'integer', 'description' => 'Maximum number of items to return (default 25, max 100).'],
                 'after' => ['type' => 'string', 'description' => 'Pagination cursor returned as "Next cursor" by a previous list call.'],
                 'is_hidden' => ['type' => 'boolean', 'description' => 'hide_comment: true to hide the comment, false to unhide it.'],
                 'metric' => ['type' => 'string', 'description' => 'Comma-separated metrics for insights, e.g. page_impressions,page_engaged_users.'],
                 'period' => ['type' => 'string', 'description' => 'Insights period: day, week, days_28, month, or lifetime.'],
             ],
-            'required' => ['action', 'access_token'],
+            'required' => ['action'],
         ];
     }
 
@@ -79,6 +81,7 @@ class FacebookTool extends BaseTool
                 $this->requiredMessage($arguments),
                 $this->string($arguments, 'link'),
                 $this->pageAccessToken($this->pageId($arguments)),
+                $this->string($arguments, 'asset'),
             ),
             'delete_post' => $this->deleteObject(
                 $this->id($arguments, 'post_id'),
@@ -157,7 +160,7 @@ class FacebookTool extends BaseTool
         return $this->formatPost($data);
     }
 
-    private function createPost(string $pageId, string $message, string $link, string $pageToken): string
+    private function createPost(string $pageId, string $message, string $link, string $pageToken, string $asset = ''): string
     {
         $payload = ['message' => $message];
 
@@ -167,7 +170,23 @@ class FacebookTool extends BaseTool
 
         $data = $this->request('POST', "/{$pageId}/feed", $payload, $pageToken);
 
-        return 'Published post. ID: '.($data['id'] ?? '(unknown)');
+        $postId = (string) ($data['id'] ?? '');
+
+        if ($asset !== '' && $postId !== '') {
+            $library = app(MediaLibrary::class);
+            $tracked = $library->resolve($asset);
+
+            if ($tracked !== null) {
+                $library->markPosted(
+                    $tracked,
+                    'facebook',
+                    $postId,
+                    'https://www.facebook.com/'.$postId,
+                );
+            }
+        }
+
+        return 'Published post. ID: '.($postId !== '' ? $postId : '(unknown)');
     }
 
     private function listComments(string $objectId, int $limit, string $after): string
@@ -266,7 +285,11 @@ class FacebookTool extends BaseTool
         $pageId = trim((string) ($arguments['page_id'] ?? ''));
 
         if ($pageId === '') {
-            throw new RuntimeException('No Facebook Page ID provided. Pass page_id so the tool knows which page to act on.');
+            $pageId = (string) CredentialsFile::get('FACEBOOK_PAGE_ID', '');
+        }
+
+        if ($pageId === '') {
+            throw new RuntimeException('No Facebook Page ID provided. Pass page_id or set FACEBOOK_PAGE_ID in '.CredentialsFile::path().'.');
         }
 
         return $pageId;
@@ -372,7 +395,11 @@ class FacebookTool extends BaseTool
         $token = trim((string) ($arguments['access_token'] ?? ''));
 
         if ($token === '') {
-            throw new RuntimeException('A Facebook access token is required. Pass access_token (recall the stored token from your memory).');
+            $token = (string) CredentialsFile::get('FACEBOOK_ACCESS_TOKEN', '');
+        }
+
+        if ($token === '') {
+            throw new RuntimeException('A Facebook access token is required. Pass access_token or set FACEBOOK_ACCESS_TOKEN in '.CredentialsFile::path().'.');
         }
 
         return $token;

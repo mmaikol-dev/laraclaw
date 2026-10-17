@@ -2,14 +2,19 @@
 
 namespace Tests\Unit;
 
+use App\Models\MediaAsset;
 use App\Services\Agent\ToolRegistry;
 use App\Services\Tools\FacebookTool;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Tests\TestCase;
 
 class FacebookToolTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_the_facebook_tool_is_registered(): void
     {
         $this->assertInstanceOf(FacebookTool::class, app(ToolRegistry::class)->get('facebook'));
@@ -95,6 +100,32 @@ class FacebookToolTest extends TestCase
             && $request['message'] === 'Launch day!'
             && $request['link'] === 'https://example.com'
             && $request->hasHeader('Authorization', 'Bearer page-token-1'));
+    }
+
+    public function test_publishing_a_post_marks_the_named_clip_as_posted(): void
+    {
+        $asset = MediaAsset::factory()->create(['slug' => 'launch-clip', 'status' => MediaAsset::STATUS_UNPOSTED]);
+
+        Http::fake([
+            'graph.facebook.com/*/me/accounts*' => Http::response([
+                'data' => [['id' => 'page-1', 'access_token' => 'page-token-1']],
+            ]),
+            'graph.facebook.com/*/page-1/feed*' => Http::response(['id' => '123_456']),
+        ]);
+
+        (new FacebookTool)->execute([
+            'action' => 'create_post',
+            'access_token' => 'test-facebook-token',
+            'page_id' => 'page-1',
+            'message' => 'Launch day!',
+            'asset' => 'launch-clip',
+        ]);
+
+        $asset->refresh();
+        $this->assertSame(MediaAsset::STATUS_POSTED, $asset->status);
+        $this->assertSame('facebook', $asset->platform);
+        $this->assertSame('123_456', $asset->external_id);
+        $this->assertSame('https://www.facebook.com/123_456', $asset->external_url);
     }
 
     public function test_it_fails_when_the_page_token_cannot_be_obtained(): void
@@ -236,5 +267,36 @@ class FacebookToolTest extends TestCase
             'action' => 'explode',
             'access_token' => 'test-facebook-token',
         ]);
+    }
+
+    public function test_it_reads_credentials_from_the_credentials_file(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'fb-creds-');
+        file_put_contents($file, "FACEBOOK_ACCESS_TOKEN=token-from-file\nFACEBOOK_PAGE_ID=page-from-file\n");
+        config()->set('agent.credentials_file', $file);
+
+        Http::fake([
+            'graph.facebook.com/*/page-from-file/posts*' => Http::response([
+                'data' => [['id' => 'post-9', 'message' => 'Hi']],
+            ]),
+        ]);
+
+        try {
+            $result = (new FacebookTool)->execute(['action' => 'list_posts']);
+        } finally {
+            @unlink($file);
+        }
+
+        $this->assertStringContainsString('Post ID: post-9', $result);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/page-from-file/posts')
+            && $request->hasHeader('Authorization', 'Bearer token-from-file'));
+    }
+
+    public function test_the_tool_description_points_at_the_credentials_file(): void
+    {
+        $description = (new FacebookTool)->getDescription();
+
+        $this->assertStringContainsString(config('agent.credentials_file'), $description);
+        $this->assertStringContainsString('FACEBOOK_ACCESS_TOKEN', $description);
     }
 }

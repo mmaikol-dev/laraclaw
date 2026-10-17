@@ -1,5 +1,5 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
-import { AlertTriangle, CircleHelp, CirclePause, LoaderCircle, Play, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertTriangle, CircleHelp, CirclePause, LoaderCircle, Play, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,8 @@ type EngineTask = {
     complexity_level: string | null;
     steps_count: number;
     is_stale: boolean;
+    sudo_status: 'none' | 'requested' | 'approved' | 'denied';
+    needs_human_input: boolean;
     last_heartbeat_at: string | null;
     last_action: string | null;
     started_at: string | null;
@@ -176,6 +178,18 @@ export default function AgentTasksIndex({ tasks, filters, metrics }: AgentTasksI
                                                     <Badge variant="destructive">
                                                         <AlertTriangle className="size-3" />
                                                         stale
+                                                    </Badge>
+                                                ) : null}
+                                                {task.sudo_status === 'requested' ? (
+                                                    <Badge variant="destructive">
+                                                        <ShieldAlert className="size-3" />
+                                                        sudo approval needed
+                                                    </Badge>
+                                                ) : null}
+                                                {task.needs_human_input && task.sudo_status !== 'requested' ? (
+                                                    <Badge variant="destructive">
+                                                        <CircleHelp className="size-3" />
+                                                        needs human input
                                                     </Badge>
                                                 ) : null}
                                                 {task.complexity_level ? (

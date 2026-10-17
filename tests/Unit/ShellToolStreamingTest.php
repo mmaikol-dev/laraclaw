@@ -82,7 +82,7 @@ class ShellToolStreamingTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Blocked shell pattern');
 
-        $tool->executeStreaming(['command' => 'sudo rm -rf /'], fn (): string => '');
+        $tool->executeStreaming(['command' => 'iptables -L'], fn (): string => '');
     }
 
     public function test_registry_passes_streaming_callback_to_capable_tools(): void

@@ -225,8 +225,13 @@ class TaskAutoContinuationTest extends TestCase
 
         $task->refresh();
 
-        $this->assertSame(TaskStatus::Failed, $task->status);
         $this->assertNotSame(TaskStatus::Completed, $task->status);
+
+        // A verification failure that never passes is non-retryable, so the task
+        // is parked awaiting human input rather than left as a dead terminal
+        // failure.
+        $this->assertSame(TaskStatus::Waiting, $task->status);
+        $this->assertTrue((bool) $task->needs_human_input);
         $this->assertNotNull($task->failure_reason);
     }
 

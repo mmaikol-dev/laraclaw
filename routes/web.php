@@ -3,6 +3,7 @@
 use App\Http\Controllers\AgentTasksController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\MediaController;
 use App\Http\Controllers\MissionController;
 use App\Http\Controllers\SkillController;
 use App\Http\Controllers\ToolController;
@@ -21,9 +22,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('tasks', 'tasks/index')->name('tasks.index');
     Route::get('agent-tasks', [AgentTasksController::class, 'index'])->name('agent-tasks.index');
     Route::get('agent-tasks/{task}', [AgentTasksController::class, 'show'])->name('agent-tasks.show');
+    Route::post('agent-tasks/{task}/sudo/approve', [AgentTasksController::class, 'approveSudo'])->name('agent-tasks.sudo.approve');
+    Route::post('agent-tasks/{task}/sudo/deny', [AgentTasksController::class, 'denySudo'])->name('agent-tasks.sudo.deny');
     Route::get('tools', [ToolController::class, 'index'])->name('tools.index');
+    Route::get('media', [MediaController::class, 'index'])->name('media.index');
+    Route::post('media/rescan', [MediaController::class, 'rescan'])->name('media.rescan');
+    Route::patch('media/{mediaAsset}/status', [MediaController::class, 'updateStatus'])->name('media.status');
     Route::get('skills', [SkillController::class, 'index'])->name('skills.index');
     Route::get('missions', [MissionController::class, 'index'])->name('missions.index');
+    Route::post('missions/{mission}/sudo/approve', [MissionController::class, 'approveSudo'])->name('missions.sudo.approve');
+    Route::post('missions/{mission}/sudo/deny', [MissionController::class, 'denySudo'])->name('missions.sudo.deny');
 
     // Employee (autonomous agent) page
     Route::get('employee', [EmployeeController::class, 'index'])->name('employee.index');

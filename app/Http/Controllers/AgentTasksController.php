@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\TaskStatus;
+use App\Jobs\ExecuteTaskStepJob;
 use App\Models\Task;
 use App\Services\TaskEngine\SpecialistAgents;
 use App\Services\TaskEngine\TaskContext;
+use App\Services\TaskEngine\TaskEngine;
 use Carbon\CarbonInterface;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -15,6 +19,7 @@ class AgentTasksController extends Controller
     public function __construct(
         protected TaskContext $context,
         protected SpecialistAgents $specialists,
+        protected TaskEngine $engine,
     ) {}
 
     public function index(Request $request): Response
@@ -73,6 +78,9 @@ class AgentTasksController extends Controller
                 'last_verified_at' => $task->last_verified_at?->toIso8601String(),
                 'model' => $task->model,
                 'complexity_level' => $task->complexity_level,
+                'sudo_status' => $task->sudo_status->value,
+                'sudo_reason' => $task->sudo_reason,
+                'needs_human_input' => (bool) $task->needs_human_input,
                 'last_heartbeat_at' => $task->last_heartbeat_at?->toIso8601String(),
                 'started_at' => $task->started_at?->toIso8601String(),
                 'completed_at' => $task->completed_at?->toIso8601String(),
@@ -107,6 +115,40 @@ class AgentTasksController extends Controller
     }
 
     /**
+     * Approve elevated (sudo) permission for a task and resume it if it was
+     * parked waiting for that approval.
+     */
+    public function approveSudo(Request $request, Task $task): RedirectResponse
+    {
+        $task->approveSudo($request->user()?->id);
+
+        $wasParked = $task->needs_human_input || $task->status === TaskStatus::Waiting;
+
+        if ($wasParked && ! $task->status->isTerminal()) {
+            $this->engine->prepareResume($task);
+            ExecuteTaskStepJob::dispatch($task->id);
+        }
+
+        return back()->with('status', "Sudo approved for task #{$task->id}.");
+    }
+
+    /**
+     * Deny elevated (sudo) permission for a task. A task that was parked
+     * waiting for sudo cannot proceed, so it is cancelled.
+     */
+    public function denySudo(Request $request, Task $task): RedirectResponse
+    {
+        $task->denySudo($request->user()?->id);
+
+        if (in_array($task->status, [TaskStatus::Waiting, TaskStatus::Pending, TaskStatus::Running, TaskStatus::Retrying, TaskStatus::Planning], true)) {
+            $task->forceFill(['failure_reason' => 'Sudo permission denied by user.'])->save();
+            $this->engine->cancel($task);
+        }
+
+        return back()->with('status', "Sudo denied for task #{$task->id}.");
+    }
+
+    /**
      * @param  CarbonInterface  $staleThreshold  Accepts both Carbon and CarbonImmutable, since the app configures Date::use(CarbonImmutable::class).
      */
     private function serializeForList(Task $task, CarbonInterface $staleThreshold): array
@@ -127,6 +169,8 @@ class AgentTasksController extends Controller
             'model' => $task->model,
             'complexity_level' => $task->complexity_level,
             'steps_count' => $task->steps->count(),
+            'sudo_status' => $task->sudo_status->value,
+            'needs_human_input' => (bool) $task->needs_human_input,
             'is_stale' => in_array($task->status->value, ['running', 'planning', 'waiting'], true)
                 && ($task->last_heartbeat_at === null || $task->last_heartbeat_at->lt($staleThreshold)),
             'last_heartbeat_at' => $task->last_heartbeat_at?->toIso8601String(),

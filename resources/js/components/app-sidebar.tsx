@@ -1,5 +1,18 @@
 import { Link } from '@inertiajs/react';
-import { BookOpen, BotMessageSquare, FolderGit2, FolderOpen, LayoutGrid, ListChecks, MessageSquare, Rocket, SlidersHorizontal, Wrench, Zap } from 'lucide-react';
+import {
+    BookOpen,
+    BotMessageSquare,
+    Clapperboard,
+    FolderGit2,
+    FolderOpen,
+    LayoutGrid,
+    ListChecks,
+    MessageSquare,
+    Rocket,
+    SlidersHorizontal,
+    Wrench,
+    Zap,
+} from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
@@ -19,6 +32,7 @@ import { edit as editAgentSettings } from '@/routes/agent-settings';
 import { index as chat } from '@/routes/chat';
 import { index as employee } from '@/routes/employee';
 import { index as files } from '@/routes/files';
+import { index as media } from '@/routes/media';
 import { index as missions } from '@/routes/missions';
 import { index as skills } from '@/routes/skills';
 import { index as tasks } from '@/routes/tasks';
@@ -55,6 +69,11 @@ const mainNavItems: NavItem[] = [
         title: 'Tools',
         href: tools(),
         icon: Wrench,
+    },
+    {
+        title: 'Media',
+        href: media(),
+        icon: Clapperboard,
     },
     {
         title: 'Skills',

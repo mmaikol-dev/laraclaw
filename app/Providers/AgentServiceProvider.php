@@ -8,6 +8,7 @@ use App\Services\Agent\AgentIdentityService;
 use App\Services\Agent\AgentOrchestrator;
 use App\Services\Agent\AgentRunState;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\ExecutionScope;
 use App\Services\Agent\GoalOwnershipService;
 use App\Services\Agent\MissionService;
 use App\Services\Agent\OllamaService;
@@ -28,11 +29,14 @@ use App\Services\TaskEngine\TaskEngine;
 use App\Services\TaskEngine\TaskSupervisor;
 use App\Services\TaskEngine\VerificationService;
 use App\Services\Tools\BrowserTool;
+use App\Services\Tools\CloudflareTool;
+use App\Services\Tools\DockerTool;
 use App\Services\Tools\DocumentTool;
 use App\Services\Tools\FacebookTool;
 use App\Services\Tools\FileTool;
 use App\Services\Tools\GoogleSheetsTool;
 use App\Services\Tools\InstagramTool;
+use App\Services\Tools\MediaClipTool;
 use App\Services\Tools\MemoryTool;
 use App\Services\Tools\MissionTool;
 use App\Services\Tools\OpenCodeTool;
@@ -43,6 +47,8 @@ use App\Services\Tools\SkillTool;
 use App\Services\Tools\TaskEngineTool;
 use App\Services\Tools\TriggerTool;
 use App\Services\Tools\WebTool;
+use App\Services\Tools\WhatsAppTool;
+use App\Services\Tools\YouTubeTool;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Support\ServiceProvider;
 
@@ -67,6 +73,7 @@ class AgentServiceProvider extends ServiceProvider
             fn ($app): AffectiveStateEngine => new AffectiveStateEngine($app->make(AffectiveStateStore::class)),
         );
         $this->app->singleton(GoalOwnershipService::class, fn (): GoalOwnershipService => new GoalOwnershipService);
+        $this->app->singleton(ExecutionScope::class, fn (): ExecutionScope => new ExecutionScope);
         $this->app->singleton(RoleProfileService::class, fn (): RoleProfileService => new RoleProfileService);
         $this->app->singleton(ProactiveMonitoringService::class, fn (): ProactiveMonitoringService => new ProactiveMonitoringService);
         $this->app->singleton(AgentIdentityService::class, fn ($app): AgentIdentityService => new AgentIdentityService(
@@ -90,6 +97,11 @@ class AgentServiceProvider extends ServiceProvider
             $registry->register(new GoogleSheetsTool);
             $registry->register(new FacebookTool);
             $registry->register(new InstagramTool);
+            $registry->register(new YouTubeTool);
+            $registry->register(new MediaClipTool);
+            $registry->register(new WhatsAppTool);
+            $registry->register(new DockerTool);
+            $registry->register(new CloudflareTool);
             $registry->register(new BrowserTool);
             $registry->register(new DocumentTool($app->make(EmbeddingService::class)));
             $registry->register(new SkillTool);

@@ -24,6 +24,7 @@ use App\Models\Conversation;
 use App\Models\Task;
 use App\Models\TaskStep;
 use App\Services\Agent\AgentService;
+use App\Services\Agent\ExecutionScope;
 use App\Services\Agent\OutcomeRecorder;
 use App\Services\Agent\RoleProfileService;
 use App\Services\Agent\ToolRegistry;
@@ -265,9 +266,10 @@ class TaskEngine
         }
 
         // A leftover Running/Retrying step means the previous worker died
-        // mid-step. This worker owns execution now, so it reclaims the step.
+        // mid-step. This worker owns execution now, so it reclaims the step and
+        // resets its start time so the in-flight heartbeat window restarts.
         if (in_array($step->status, [TaskStepStatus::Running, TaskStepStatus::Retrying], true)) {
-            $step->forceFill(['status' => TaskStepStatus::Pending])->save();
+            $step->forceFill(['status' => TaskStepStatus::Pending, 'started_at' => null])->save();
         }
 
         $this->runStep($task, $step, $listener);
@@ -393,6 +395,12 @@ class TaskEngine
                 return; // handleStepFailure already failed the task / escalated
             }
 
+            // The task was parked for human input (e.g. a non-retryable
+            // failure). Stop stepping until a human resumes it.
+            if ($task->status === TaskStatus::Waiting) {
+                return;
+            }
+
             // Step is in Retrying state — loop again.
             if (++$attempts >= $maxAttempts) {
                 $error = (string) ($step->error ?: 'Step exceeded retry limit.');
@@ -407,6 +415,11 @@ class TaskEngine
 
     private function recordStepCheckpoint(Task $task, TaskStep $step): void
     {
+        // Real progress clears any automatic-recovery budget consumed while the
+        // task was stalling, so only *consecutive* recoveries without progress
+        // ever hit the supervisor's cap.
+        $task->resetAutoRecoveries();
+
         $task->update(['last_result' => $step->result ?? '']);
         $task->createCheckpoint(
             $step->description,
@@ -438,7 +451,14 @@ class TaskEngine
         $fullPrompt = $this->buildStepPrompt($task, $step);
 
         try {
-            $message = $this->agent->run($conversation, $fullPrompt, "conversation.{$conversation->id}");
+            $scope = app(ExecutionScope::class);
+            $scope->beginTask($task);
+
+            try {
+                $message = $this->agent->run($conversation, $fullPrompt, "conversation.{$conversation->id}");
+            } finally {
+                $scope->end();
+            }
 
             $content = (string) $message->content;
 
@@ -546,8 +566,17 @@ class TaskEngine
             return;
         }
 
-        $failureType = $step->failure_type ?? $this->classifier->classify($result['error'], $step->prompt ?? null);
+        $classified = $this->classifier->classify($result['error'], $step->prompt ?? null);
+        $failureType = $step->failure_type ?? $classified;
         $error = $result['error'];
+
+        // A freshly-detected, definitive non-retryable failure (e.g. a 401 auth
+        // error surfaced mid-retry) must not be masked by a retryable type
+        // stored on an earlier attempt, or the task burns its retry budget on a
+        // problem no retry can fix. Generic logical errors keep the stored type.
+        if ($step->failure_type !== null && ! $classified->isRetryable() && $classified !== TaskFailureType::LogicalError) {
+            $failureType = $classified;
+        }
 
         $task->update([
             'last_error' => $error,
@@ -709,12 +738,60 @@ class TaskEngine
      */
     private function fail(Task $task, string $reason, TaskFailureType $failureType, ?callable $listener, ?array $result = null): TaskResult
     {
+        // A non-retryable failure needs a human: rather than leaving a dead
+        // terminal task or burning the remaining budget, park it in the
+        // cooperative waiting state. The supervisor deliberately never touches
+        // Waiting tasks, so the agent stops working on it until a human resumes.
+        if (! $failureType->isRetryable()) {
+            return $this->parkForHumanInput($task, $reason, $failureType, $listener, $result);
+        }
+
         $task->markFailed($reason, $failureType);
         event(new TaskFailed($task, $reason));
         $this->outcomes->recordTask($task, AgentRunOutcome::STATUS_FAILED, $result, $reason);
         $this->notify($listener, ['type' => 'error', 'error' => $reason]);
 
         return TaskResult::fromTask($task);
+    }
+
+    /**
+     * Park a task awaiting a human: record why, reset any failed steps so a
+     * human resume re-runs them, and move the task into the Waiting state with
+     * a manual (`human_input`) resume condition.
+     */
+    public function park(Task $task, string $reason, TaskFailureType $failureType = TaskFailureType::Unrecoverable): TaskResult
+    {
+        return $this->parkForHumanInput($task, $reason, $failureType, null);
+    }
+
+    private function parkForHumanInput(Task $task, string $reason, TaskFailureType $failureType, ?callable $listener, ?array $result = null): TaskResult
+    {
+        DB::transaction(function () use ($task, $reason, $failureType): void {
+            // A parked task must remain runnable on resume, so failed steps go
+            // back to Pending (their error/failure_type are kept for context).
+            foreach ($task->steps()->where('status', TaskStepStatus::Failed)->get() as $step) {
+                $step->forceFill([
+                    'status' => TaskStepStatus::Pending,
+                    'failure_type' => $failureType,
+                ])->save();
+            }
+
+            $task->forceFill([
+                'needs_human_input' => true,
+                'failure_reason' => $reason,
+                'failure_type' => $failureType,
+            ])->save();
+
+            $task->markWaiting("Needs human input: {$reason}", ['type' => 'human_input']);
+        });
+
+        // Parked runs still end without success, so record the outcome for
+        // analytics just as a terminal failure would.
+        $this->outcomes->recordTask($task, AgentRunOutcome::STATUS_FAILED, $result, $reason);
+
+        $this->notify($listener, ['type' => 'human_input', 'error' => $reason]);
+
+        return TaskResult::fromTask($task->refresh());
     }
 
     // -------------------------------------------------------------------------
@@ -830,9 +907,12 @@ class TaskEngine
      * Recover a stalled task. Determines the last successful step, whether the
      * current step completed, and continues from the correct point.
      *
+     * @param  bool  $automatic  True when the supervisor is recovering on its
+     *                           own (consumes the automatic-recovery budget);
+     *                           false when a human explicitly asked to recover.
      * @return array{status: string, checkpoint?: array<string, mixed>, resumed_from?: int}
      */
-    public function recover(Task $task, ?callable $listener = null): array
+    public function recover(Task $task, ?callable $listener = null, bool $automatic = false): array
     {
         $checkpoint = $task->latestCheckpoint;
 
@@ -867,6 +947,14 @@ class TaskEngine
         // Reset the execution window so a recovered task is not immediately
         // re-flagged as stalled by the supervisor on the next pass.
         $task->touchHeartbeat();
+
+        // An automatic recovery consumes the bounded budget; a human-initiated
+        // one clears it (a person stepping in is a fresh start).
+        if ($automatic) {
+            $task->incrementAutoRecoveries();
+        } else {
+            $task->resetAutoRecoveries();
+        }
 
         $this->notify($listener, [
             'type' => 'status',

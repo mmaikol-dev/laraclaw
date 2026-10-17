@@ -1,6 +1,9 @@
-import { Head, Link, usePoll } from '@inertiajs/react';
-import { CheckCircle2, ChevronLeft, CircleDot, ClipboardList, History, Play, Square, Wrench } from 'lucide-react';
+import { Head, Link, router, usePoll } from '@inertiajs/react';
+import { CheckCircle2, ChevronLeft, CircleDot, ClipboardList, History, LoaderCircle, Play, ShieldAlert, ShieldCheck, Square, Wrench } from 'lucide-react';
+import { useState } from 'react';
+import { approveSudo, denySudo } from '@/actions/App/Http/Controllers/AgentTasksController';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/app-layout';
 import { index as agentTasks, show as showTask } from '@/routes/agent-tasks';
@@ -52,6 +55,9 @@ type AgentTaskShowProps = {
         last_verified_at: string | null;
         model: string | null;
         complexity_level: string | null;
+        sudo_status: 'none' | 'requested' | 'approved' | 'denied';
+        sudo_reason: string | null;
+        needs_human_input: boolean;
         last_heartbeat_at: string | null;
         started_at: string | null;
         completed_at: string | null;
@@ -111,8 +117,16 @@ function ActionIcon({ status }: { status: string }) {
 
 export default function AgentTasksShow({ task, context_summary }: AgentTaskShowProps) {
     const progress = task.total_steps > 0 ? Math.round((task.current_step / task.total_steps) * 100) : 0;
+    const [sudoBusy, setSudoBusy] = useState<'approve' | 'deny' | null>(null);
 
     usePoll(5000, { only: ['task', 'context_summary'] });
+
+    function resolveSudo(action: 'approve' | 'deny'): void {
+        setSudoBusy(action);
+        const definition = action === 'approve' ? approveSudo(task.id) : denySudo(task.id);
+
+        router.post(definition.url, {}, { onFinish: () => setSudoBusy(null) });
+    }
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Agent Tasks', href: agentTasks() },
@@ -154,6 +168,40 @@ export default function AgentTasksShow({ task, context_summary }: AgentTaskShowP
                         </CardDescription>
                     </CardHeader>
                 </Card>
+
+                {task.sudo_status === 'requested' ? (
+                    <Card className="border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-base">
+                                <ShieldAlert className="size-4 text-amber-600" />
+                                Elevated (sudo) permission requested
+                            </CardTitle>
+                            <CardDescription>
+                                The agent asked to run commands with sudo. Approve only if you trust this task to run elevated commands.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {task.sudo_reason ? <p className="rounded-lg bg-muted/50 p-2 text-sm">{task.sudo_reason}</p> : null}
+                            <div className="flex flex-wrap gap-2">
+                                <Button size="sm" onClick={() => resolveSudo('approve')} disabled={sudoBusy !== null}>
+                                    {sudoBusy === 'approve' ? <LoaderCircle className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                                    Approve sudo
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => resolveSudo('deny')} disabled={sudoBusy !== null}>
+                                    {sudoBusy === 'deny' ? <LoaderCircle className="size-4 animate-spin" /> : <ShieldAlert className="size-4" />}
+                                    Deny
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                ) : null}
+
+                {task.sudo_status === 'approved' ? (
+                    <Badge variant="outline" className="w-fit gap-1 border-emerald-500/50 text-emerald-600">
+                        <ShieldCheck className="size-3" />
+                        sudo approved
+                    </Badge>
+                ) : null}
 
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
                     <div className="space-y-4">

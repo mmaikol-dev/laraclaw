@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\SudoStatus;
 use Database\Factories\MissionFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -32,6 +33,11 @@ class Mission extends Model
         'spent_tokens',
         'started_at',
         'completed_at',
+        'sudo_status',
+        'sudo_reason',
+        'sudo_requested_at',
+        'sudo_resolved_at',
+        'sudo_resolved_by',
     ];
 
     protected $casts = [
@@ -39,6 +45,13 @@ class Mission extends Model
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
         'spent_tokens' => 'integer',
+        'sudo_status' => SudoStatus::class,
+        'sudo_requested_at' => 'datetime',
+        'sudo_resolved_at' => 'datetime',
+    ];
+
+    protected $attributes = [
+        'sudo_status' => 'none',
     ];
 
     public function features(): HasMany
@@ -129,5 +142,43 @@ class Mission extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', 'active');
+    }
+
+    // -------------------------------------------------------------------------
+    // Elevated (sudo) approval
+    // -------------------------------------------------------------------------
+
+    public function sudoAllowed(): bool
+    {
+        return $this->sudo_status === SudoStatus::Approved;
+    }
+
+    public function requestSudo(string $reason): void
+    {
+        $this->forceFill([
+            'sudo_status' => SudoStatus::Requested,
+            'sudo_reason' => $reason,
+            'sudo_requested_at' => now(),
+            'sudo_resolved_at' => null,
+            'sudo_resolved_by' => null,
+        ])->save();
+    }
+
+    public function approveSudo(?int $userId = null): void
+    {
+        $this->forceFill([
+            'sudo_status' => SudoStatus::Approved,
+            'sudo_resolved_at' => now(),
+            'sudo_resolved_by' => $userId,
+        ])->save();
+    }
+
+    public function denySudo(?int $userId = null): void
+    {
+        $this->forceFill([
+            'sudo_status' => SudoStatus::Denied,
+            'sudo_resolved_at' => now(),
+            'sudo_resolved_by' => $userId,
+        ])->save();
     }
 }

@@ -50,6 +50,11 @@ return [
             'GOOGLE_SHEETS_SERVICE_ACCOUNT',
             storage_path('rdl-478707-2c066429878f.json'),
         ),
+        'youtube_client_id' => env('YOUTUBE_CLIENT_ID', ''),
+        'youtube_client_secret' => env('YOUTUBE_CLIENT_SECRET', ''),
+        'youtube_refresh_token' => env('YOUTUBE_REFRESH_TOKEN', ''),
+        'youtube_redirect_uri' => env('YOUTUBE_REDIRECT_URI', ''),
+        'youtube_upload_timeout' => (int) env('YOUTUBE_UPLOAD_TIMEOUT', 1800),
     ],
 
     'facebook' => [
@@ -58,6 +63,22 @@ return [
 
     'instagram' => [
         'graph_url' => env('INSTAGRAM_GRAPH_URL', 'https://graph.facebook.com/v21.0'),
+    ],
+
+    'openwa' => [
+        'base_url' => env('OPENWA_BASE_URL', 'http://127.0.0.1:2785/api'),
+        'api_key' => env('OPENWA_API_KEY', ''),
+        'session_id' => env('OPENWA_SESSION_ID', ''),
+    ],
+
+    'docker' => [
+        'binary' => env('DOCKER_BINARY', 'docker'),
+        'host' => env('DOCKER_HOST', ''),
+        'timeout' => (int) env('DOCKER_TIMEOUT', 60),
+    ],
+
+    'cloudflare' => [
+        'api_url' => env('CLOUDFLARE_API_URL', 'https://api.cloudflare.com/client/v4'),
     ],
 
 ];

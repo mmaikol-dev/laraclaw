@@ -17,7 +17,8 @@ class InstagramTool extends BaseTool
 
     public function getDescription(): string
     {
-        return 'Manage an Instagram Business/Creator account through the Instagram Graph API. Content: read the account, its media and stories; read comments; comment on media; reply to, hide or delete comments; publish media (image, video, reel, or story) via containers. Messaging (DMs): list conversations, read a conversation or a single message, send messages, and mark a thread as seen. Ads: list the ad accounts authorized to advertise for the account. Creators: research any Instagram business/creator account by username. Actions: account, list_media, get_media, list_comments, comment, reply, delete_comment, hide_comment, create_container, publish, media_insights, account_insights, list_conversations, get_conversation, get_message, send_message, mark_seen, list_stories, list_ad_accounts, business_discovery. Pass access_token and account_id from your stored credentials (memory) with every call.';
+        return 'Manage an Instagram Business/Creator account through the Instagram Graph API. Content: read the account, its media and stories; read comments; comment on media; reply to, hide or delete comments; publish media (image, video, reel, or story) via containers. Messaging (DMs): list conversations, read a conversation or a single message, send messages, and mark a thread as seen. Ads: list the ad accounts authorized to advertise for the account. Creators: research any Instagram business/creator account by username. Actions: account, list_media, get_media, list_comments, comment, reply, delete_comment, hide_comment, create_container, publish, media_insights, account_insights, list_conversations, get_conversation, get_message, send_message, mark_seen, list_stories, list_ad_accounts, business_discovery. '
+            .CredentialsFile::hint().' (keys: INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_ACCOUNT_ID). Pass access_token and account_id with the call, or omit them and the tool reads them from that file. Never print, log, or paste the token.';
     }
 
     public function getParameters(): array
@@ -37,8 +38,8 @@ class InstagramTool extends BaseTool
                     ],
                     'description' => 'The Instagram operation to perform.',
                 ],
-                'access_token' => ['type' => 'string', 'description' => 'Instagram Graph access token. Recall the stored token from your memory and pass it here each call.'],
-                'account_id' => ['type' => 'string', 'description' => 'Instagram Business account ID. Recall the stored account ID from your memory and pass it here each call.'],
+                'access_token' => ['type' => 'string', 'description' => 'Instagram Graph access token. Optional: defaults to INSTAGRAM_ACCESS_TOKEN in the credentials file ('.CredentialsFile::path().').'],
+                'account_id' => ['type' => 'string', 'description' => 'Instagram Business account ID. Optional: defaults to INSTAGRAM_ACCOUNT_ID in the credentials file ('.CredentialsFile::path().').'],
                 'media_id' => ['type' => 'string', 'description' => 'Instagram media (post) ID.'],
                 'comment_id' => ['type' => 'string', 'description' => 'Instagram comment ID (reply, delete_comment, hide_comment).'],
                 'message' => ['type' => 'string', 'description' => 'Text used by comment, reply, and send_message.'],
@@ -47,6 +48,7 @@ class InstagramTool extends BaseTool
                 'video_url' => ['type' => 'string', 'description' => 'Publicly reachable video URL for create_container.'],
                 'media_type' => ['type' => 'string', 'description' => 'Container type: IMAGE, VIDEO, REELS, or STORIES (default IMAGE).'],
                 'creation_id' => ['type' => 'string', 'description' => 'Container creation ID returned by create_container, used by publish.'],
+                'asset' => ['type' => 'string', 'description' => 'Optional media-library clip (slug or filename) that this post publishes. When set, a successful publish marks that clip as posted so it is not posted twice. Check media_clip action=library for unposted clips.'],
                 'limit' => ['type' => 'integer', 'description' => 'Maximum number of items to return (default 25, max 100).'],
                 'after' => ['type' => 'string', 'description' => 'Pagination cursor returned as "Next cursor" by a previous list call.'],
                 'hide' => ['type' => 'boolean', 'description' => 'hide_comment: true to hide the comment, false to unhide it.'],
@@ -60,7 +62,7 @@ class InstagramTool extends BaseTool
                 'reply_to' => ['type' => 'string', 'description' => 'Message ID this DM replies to (send_message).'],
                 'username' => ['type' => 'string', 'description' => 'Instagram username (with or without @) of an account to research via business_discovery.'],
             ],
-            'required' => ['action', 'access_token'],
+            'required' => ['action'],
         ];
     }
 
@@ -106,6 +108,7 @@ class InstagramTool extends BaseTool
             'publish' => $this->publish(
                 $this->accountId($arguments),
                 $this->id($arguments, 'creation_id'),
+                $this->string($arguments, 'asset'),
             ),
             'media_insights' => $this->mediaInsights(
                 $this->id($arguments, 'media_id'),
@@ -261,11 +264,22 @@ class InstagramTool extends BaseTool
         return 'Created media container. ID: '.($data['id'] ?? '(unknown)')."\nUse the publish action with this creation_id to publish it.";
     }
 
-    private function publish(string $accountId, string $creationId): string
+    private function publish(string $accountId, string $creationId, string $asset = ''): string
     {
         $data = $this->request('POST', "/{$accountId}/media_publish", ['creation_id' => $creationId]);
 
-        return 'Published media. ID: '.($data['id'] ?? '(unknown)');
+        $mediaId = (string) ($data['id'] ?? '');
+
+        if ($asset !== '' && $mediaId !== '') {
+            $library = app(MediaLibrary::class);
+            $tracked = $library->resolve($asset);
+
+            if ($tracked !== null) {
+                $library->markPosted($tracked, 'instagram', $mediaId, null);
+            }
+        }
+
+        return 'Published media. ID: '.($mediaId !== '' ? $mediaId : '(unknown)');
     }
 
     private function mediaInsights(string $mediaId, string $metric): string
@@ -526,7 +540,11 @@ class InstagramTool extends BaseTool
         $accountId = trim((string) ($arguments['account_id'] ?? ''));
 
         if ($accountId === '') {
-            throw new RuntimeException('No Instagram account ID provided. Pass account_id so the tool knows which account to act on.');
+            $accountId = (string) CredentialsFile::get('INSTAGRAM_ACCOUNT_ID', '');
+        }
+
+        if ($accountId === '') {
+            throw new RuntimeException('No Instagram account ID provided. Pass account_id or set INSTAGRAM_ACCOUNT_ID in '.CredentialsFile::path().'.');
         }
 
         return $accountId;
@@ -640,7 +658,11 @@ class InstagramTool extends BaseTool
         $token = trim((string) ($arguments['access_token'] ?? ''));
 
         if ($token === '') {
-            throw new RuntimeException('An Instagram access token is required. Pass access_token (recall the stored token from your memory).');
+            $token = (string) CredentialsFile::get('INSTAGRAM_ACCESS_TOKEN', '');
+        }
+
+        if ($token === '') {
+            throw new RuntimeException('An Instagram access token is required. Pass access_token or set INSTAGRAM_ACCESS_TOKEN in '.CredentialsFile::path().'.');
         }
 
         return $token;

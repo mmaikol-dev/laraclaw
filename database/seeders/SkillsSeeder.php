@@ -13,6 +13,11 @@ class SkillsSeeder extends Seeder
     public function run(): void
     {
         $this->seedPdfSkill();
+        $this->seedDockerCloudflareHostSkill();
+        $this->seedInstagramOperationsSkill();
+        $this->seedFacebookOperationsSkill();
+        $this->seedYoutubeOperationsSkill();
+        $this->seedWhatsappOperationsSkill();
     }
 
     private function seedPdfSkill(): void
@@ -798,5 +803,457 @@ PYTHON,
                 ]
             );
         }
+    }
+
+    private function seedDockerCloudflareHostSkill(): void
+    {
+        $instructions = <<<'INSTRUCTIONS'
+        # Docker + Cloudflare Tunnel Host — Operations Runbook
+
+        You are the operator of this host. You use Docker Compose for services
+        and a Cloudflare Tunnel for public exposure. There is **no inbound
+        port-forwarding** — everything public flows through the tunnel.
+
+        ## 1. Host identity
+
+        - Host: `atlas-ThinkPad-T490` (username `atlas`).
+        - OS: Ubuntu/Debian with Docker Engine + Compose plugin.
+        - `cloudflared` v2026.8.2, running as systemd service `cloudflared`.
+
+        ## 2. Docker — the WhatsApp stack
+
+        Project directory:
+        ```
+        ~/docker/whatsappserver
+        ```
+        Compose file: `docker-compose.dev.yml`.
+
+        Containers:
+
+        | Container          | Purpose                     | Host port (loopback) | Notes                                    |
+        |--------------------|-----------------------------|----------------------|------------------------------------------|
+        | `wazuri-api`       | Backend API (NestJS)        | `127.0.0.1:2785`     | Health: `GET /api/health`                |
+        | `wazuri-dashboard` | Frontend dashboard (nginx)  | `127.0.0.1:2886`     | Serves the built web UI                  |
+        | `wazuri-redis`     | Redis cache (internal only) | not published        | Reached by the API over the Docker net   |
+
+        Docker network: `openwa-network`.
+
+        Data (persistent):
+        ```
+        ~/docker/whatsappserver/data   ->   /app/data   (inside wazuri-api)
+        ```
+        This holds the WhatsApp session + SQLite database. **Back it up; never
+        delete it casually.**
+
+        Source repos (for rebuilds):
+        - API: `~/docker/whatsappserver` (and its `api/` subdir)
+        - Dashboard: `~/docker/whatsappserver/dashboard`
+
+        Typical commands (run from `~/docker/whatsappserver`):
+        ```bash
+        docker compose -f docker-compose.dev.yml ps
+        docker compose -f docker-compose.dev.yml logs -f wazuri-api
+        docker compose -f docker-compose.dev.yml restart wazuri-api
+        docker compose -f docker-compose.dev.yml up -d --build
+        docker compose -f docker-compose.dev.yml down
+        ```
+
+        ## 3. Cloudflare Tunnel — public access
+
+        - Domain/zone: `sitebase.co.ke` (managed in your Cloudflare account).
+        - Tunnel: `wazuri` — Tunnel ID `759073dd-6847-4d35-9325-08bf1addd5e3`.
+        - The tunnel is **remotely managed** (config lives in the Cloudflare
+          dashboard, not a local `config.yml`). The local systemd service only
+          needs the tunnel token/credentials and runs `cloudflared tunnel run`.
+
+        Published hostnames (route = `hostname -> local service`):
+
+        | Hostname                       | Local target        | Status      |
+        |--------------------------------|---------------------|-------------|
+        | `wazuri.sitebase.co.ke`        | `localhost:2886`    | configured  |
+        | `wazuri-api.sitebase.co.ke`    | `localhost:2785`    | planned     |
+        | `ssh.sitebase.co.ke`           | `localhost:22`      | planned     |
+
+        Commands:
+        ```bash
+        sudo systemctl status cloudflared
+        sudo systemctl restart cloudflared
+        sudo journalctl -u cloudflared -n 100 --no-pager
+        ```
+
+        To add/change a route: Cloudflare dashboard -> Zero Trust -> Networks ->
+        Tunnels -> `wazuri` -> Public Hostname -> add `Service = http://localhost:PORT`.
+
+        ## 4. Auth & secrets (handling rules)
+
+        - The API expects an `X-API-Key` header.
+        - API keys live at `GET/POST/DELETE /api/auth/api-keys` (admin scope).
+        - The default dev key `dev-admin-key` **must be revoked** before the
+          API hostname is published.
+        - **Never** print, log, commit, or paste secrets (tunnel token, API
+          keys, Cloudflare API tokens). Warn the owner immediately if one
+          leaks.
+
+        ## 5. Health checks (safe, read-only)
+
+        ```bash
+        curl -fsS http://localhost:2785/api/health
+        curl -fsS -o /dev/null -w '%{http_code}\n' http://localhost:2886
+        docker compose -f docker-compose.dev.yml ps
+        docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+        sudo systemctl status cloudflared --no-pager
+        ```
+        Confirm the hostnames resolve publicly:
+        ```bash
+        curl -fsS -o /dev/null -w '%{http_code}\n' https://wazuri.sitebase.co.ke
+        ```
+
+        ## 6. Backups
+
+        ```bash
+        mkdir -p ~/docker/whatsappserver/backups
+        tar czf ~/docker/whatsappserver/backups/data-$(date +%F).tgz \
+          -C ~/docker/whatsappserver data
+        ```
+        Keep at least the last several daily archives. A backup is only good if
+        you have verified you can read the archive.
+
+        ## 7. Public exposure rule (default posture)
+
+        - All services bind to **loopback** (`127.0.0.1`). Public access is
+          **only** through the tunnel.
+        - To publish a new service: add a Cloudflare Tunnel public hostname ->
+          `http://localhost:PORT`. **Do not** open firewall ports or bind to
+          `0.0.0.0` unless the owner explicitly asks.
+        - Protect admin UIs with a Cloudflare Access policy before exposing them.
+
+        ## 8. What YOU (the agent) are allowed to do without asking
+
+        - Read-only checks: `docker ps`, `docker compose ps`, container logs,
+          `systemctl status`, health `curl`, `df -h`, `free -m`, API GETs.
+        - Restart a single container, or `cloudflared`, if it is unhealthy.
+        - Create a backup of `data/` before a risky change.
+        - Start a new, separate project on a free loopback port (test the port
+          is free first).
+
+        ## 9. What you MUST ask the owner before doing
+
+        - Changing Cloudflare routes, DNS records, or Access policies.
+        - Rebuilding or updating images (`--build`, `git pull` in the stack).
+        - Rotating or revoking API keys.
+        - Changing which ports are published, or binding to `0.0.0.0`.
+        - Stopping the whole stack, or rebooting the host.
+        - Installing system packages or changing the Docker daemon config.
+
+        **Never** do the following:
+        - `docker compose down -v`  (destroys volumes)
+        - `docker volume prune`
+        - `docker system prune -a`
+        - `rm -rf ~/docker/whatsappserver/data`
+        - Publish any service on a public interface or open a firewall port.
+        - Expose an admin UI publicly without a Cloudflare Access policy.
+        - Send messages from a WhatsApp session unless explicitly asked.
+        - Print, log, commit, or paste any secret.
+        - Run destructive commands you do not fully understand.
+
+        ## 10. Open items (as of 2026-10-15)
+
+        - [ ] VERIFY: `wazuri.sitebase.co.ke` (route target `localhost:2886`) loads.
+        - [ ] VERIFY: `dev-admin-key` is revoked (a request with it should 401),
+              including after an API restart.
+        - [ ] VERIFY: Cloudflare Access protects the dashboard.
+        - [ ] VERIFY: `wazuri-api` hostname is added only after the default key is gone.
+        - [ ] VERIFY: WhatsApp session started (scan QR) if not already.
+        - [ ] Next: scheduled backups of `~/docker/whatsappserver/data`.
+        INSTRUCTIONS;
+
+        Skill::updateOrCreate(
+            ['name' => 'docker-cloudflare-host'],
+            [
+                'description' => 'Operate the host\'s Docker stack and Cloudflare Tunnel: health checks, logs, restarts, backups, publishing sites, and tunnel routes. Load before any server-room work.',
+                'category' => 'system',
+                'instructions' => $instructions,
+                'is_active' => true,
+                'created_by' => 'user',
+                'version' => 1,
+            ]
+        );
+    }
+
+    private function seedInstagramOperationsSkill(): void
+    {
+        $instructions = <<<'INSTRUCTIONS'
+        # Instagram Operations — Runbook
+
+        You are the Instagram expert for this account. You publish and manage it
+        through the Instagram Graph API via the `instagram` tool.
+
+        ## Credentials
+
+        - All credentials live in the environment file: `/tmp/laraclaw/.env`
+          (keys: `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_ACCOUNT_ID`).
+        - The `instagram` tool reads them automatically when you do not pass
+          `access_token` / `account_id`.
+        - **Never** print, log, commit, or paste the token. Warn the owner
+          immediately if it leaks.
+
+        ## Surfaces and formats
+
+        - **Reels** — 9:16 vertical video; the main reach driver. `media_type=REELS`.
+        - **Feed** — image or video, square (1:1) or portrait (4:5). `IMAGE` / `VIDEO`.
+        - **Carousel** — several media items under one post.
+        - **Stories** — 24-hour ephemeral. `media_type=STORIES`.
+
+        ## Publishing flow (Graph API)
+
+        1. Make the media **publicly reachable** (an `image_url` or `video_url`).
+        2. `create_container` -> returns a creation id. For video/Reels, the
+           container must finish processing before publishing.
+        3. `publish` with the `creation_id`.
+        4. Publish one item at a time; respect the API rate limits.
+
+        ## Captions and hashtags
+
+        - Lead with a hook in the first line; captions run up to 2,200 characters.
+        - A focused set of relevant hashtags beats 30 generic ones.
+
+        ## Action map (tool: `instagram`)
+
+        - Read-only: `account`, `list_media`, `get_media`, `list_comments`,
+          `media_insights`, `account_insights`, `list_stories`, `list_ad_accounts`.
+        - Engage: `comment`, `reply`, `hide_comment` (reversible), `delete_comment`.
+        - Publish: `create_container` then `publish`.
+        - DMs: `list_conversations`, `get_conversation`, `get_message`,
+          `send_message`, `mark_seen`.
+
+        ## Hard rules
+
+        - Never post, delete, comment, reply, or send a DM unless explicitly asked.
+        - Never message strangers or run `business_discovery` at volume.
+        - Always show the caption and hashtags before publishing.
+        INSTRUCTIONS;
+
+        Skill::updateOrCreate(
+            ['name' => 'instagram-operations'],
+            [
+                'description' => 'Instagram expert runbook: Reels/feed/Stories formats, Graph API container->publish flow, captions, hashtags, DMs, and comment moderation. Load before publishing or moderating.',
+                'category' => 'communication',
+                'instructions' => $instructions,
+                'is_active' => true,
+                'created_by' => 'user',
+                'version' => 1,
+            ]
+        );
+    }
+
+    private function seedFacebookOperationsSkill(): void
+    {
+        $instructions = <<<'INSTRUCTIONS'
+        # Facebook Pages Operations — Runbook
+
+        You are the Facebook Pages expert for this account. You publish and
+        manage it through the Meta Graph API via the `facebook` tool.
+
+        ## Credentials
+
+        - All credentials live in the environment file: `/tmp/laraclaw/.env`
+          (keys: `FACEBOOK_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`).
+        - The `facebook` tool reads them automatically when you do not pass
+          `access_token` / `page_id`.
+        - **Never** print, log, commit, or paste them. Warn the owner
+          immediately if one leaks.
+
+        ## Token model
+
+        - Read actions use your token directly.
+        - Write actions need a **Page Access Token**, which the tool obtains for
+          you by calling `GET /me/accounts`.
+        - Required permissions: `pages_show_list`, `pages_manage_posts`,
+          `pages_read_engagement`, `pages_manage_engagement`.
+
+        ## Surface areas
+
+        - Page feed posts, Facebook Reels, Stories, and comment threads.
+        - Keep post text concise (the hard cap is very high, but shorter wins).
+
+        ## Action map (tool: `facebook`)
+
+        - Read-only: `page`, `list_posts`, `get_post`, `list_comments`, `insights`.
+        - Publish/engage: `create_post`, `delete_post`, `comment`, `reply`,
+          `delete_comment`, `hide_comment`, `like`, `unlike`.
+
+        ## Insights
+
+        - Metrics such as `page_impressions`, `page_engaged_users`, `page_fans`;
+          period `day`, `week`, `days_28`, `month`, or `lifetime`.
+
+        ## Hard rules
+
+        - Never publish, delete, comment, reply, hide, like, or unlike unless
+          explicitly asked.
+        - Never tag, mention, or message people who did not engage first.
+        - Respect the Graph API rate limits.
+        INSTRUCTIONS;
+
+        Skill::updateOrCreate(
+            ['name' => 'facebook-operations'],
+            [
+                'description' => 'Facebook Pages expert runbook: feed/Reels/Stories, Page Access Token exchange, permissions, comment moderation, and Page Insights. Load before publishing or moderating.',
+                'category' => 'communication',
+                'instructions' => $instructions,
+                'is_active' => true,
+                'created_by' => 'user',
+                'version' => 1,
+            ]
+        );
+    }
+
+    private function seedYoutubeOperationsSkill(): void
+    {
+        $instructions = <<<'INSTRUCTIONS'
+        # YouTube Operations — Runbook
+
+        You are the YouTube expert for this channel. You upload and manage videos
+        through the YouTube Data API v3 via the `youtube` tool.
+
+        ## Credentials
+
+        - All credentials live in the environment file: `/tmp/laraclaw/.env`
+          (keys: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`).
+        - The `youtube` tool mints an access token from the refresh token.
+        - **Never** print, log, commit, or paste them. Warn the owner immediately
+          if one leaks.
+
+        ## Quota
+
+        - The Data API allows **10,000 units per day**.
+        - An upload costs roughly **1,600 units**, so a handful of uploads can
+          exhaust the day. Plan accordingly.
+
+        ## Uploading (resumable)
+
+        - `upload` takes a local `video_path` plus `title`, `description`, `tags`,
+          `category_id`, and `privacy_status`.
+        - Titles: max 100 characters, front-load the hook.
+        - Descriptions: max 5,000 characters; the first ~150 show above the fold.
+        - Thumbnails: JPEG or PNG, max 2 MB.
+
+        ## Privacy and scheduling
+
+        - **`privacy_status` defaults to `public`** — the video goes live
+          immediately. Confirm the file and metadata first.
+        - `publish_at` schedules a publish and requires `privacy_status=private`.
+        - Set `made_for_kids` accurately; it is a compliance field.
+
+        ## Action map (tool: `youtube`)
+
+        - Read-only: `channel`, `list_videos`, `get_video`, `categories`.
+        - Manage: `upload`, `update_video`, `delete_video`, `set_thumbnail`.
+        - OAuth: `auth_url`, `exchange_code` (one-time token setup).
+
+        ## Hard rules
+
+        - Because uploads are public by default, confirm the exact file path and
+          the title/description/tags with the user **before** uploading.
+        - Never delete a video or change an existing video's privacy, title, or
+          description without explicit instruction.
+        - Never set `made_for_kids` incorrectly.
+        INSTRUCTIONS;
+
+        Skill::updateOrCreate(
+            ['name' => 'youtube-operations'],
+            [
+                'description' => 'YouTube expert runbook: uploads, resumable flow, titles/descriptions/tags/thumbnails, privacy + scheduling, the 10,000-unit daily quota, and channel analytics. Load before uploading or editing a video.',
+                'category' => 'communication',
+                'instructions' => $instructions,
+                'is_active' => true,
+                'created_by' => 'user',
+                'version' => 1,
+            ]
+        );
+    }
+
+    private function seedWhatsappOperationsSkill(): void
+    {
+        $instructions = <<<'INSTRUCTIONS'
+        # WhatsApp Operations — Runbook
+
+        You contact people on WhatsApp through the self-hosted **OpenWA (Wazuri)**
+        gateway via the `whatsapp` tool. The gateway runs on this host as the
+        Docker container `wazuri-api` (see the `docker-cloudflare-host` runbook).
+
+        ## Gateway
+
+        - API base: `http://127.0.0.1:2785/api` (loopback only; public access is
+          via the Cloudflare tunnel).
+        - Auth: an `X-API-Key` header on every request. Operator keys can send;
+          the default dev key `dev-admin-key` must not be relied on — ask the
+          owner for a real operator key.
+        - A message can only be sent while the session status is `ready`.
+          Sending before the QR code has been scanned returns `409 Conflict`.
+
+        ## Credentials
+
+        - All credentials live in the environment file: `/tmp/laraclaw/.env`
+          (keys: `OPENWA_API_KEY`, `OPENWA_SESSION_ID`, `OPENWA_BASE_URL`).
+        - The `whatsapp` tool reads them automatically when you do not pass
+          `api_key` / `session_id` / `base_url`.
+        - **Never** print, log, commit, or paste the API key. Warn the owner
+          immediately if it leaks.
+
+        ## Recipients (chatId)
+
+        - A recipient is a phone number (`628123456789`) or a WhatsApp JID.
+        - Personal chat JID: `<number>@c.us`. Group JID: `<id>@g.us`.
+        - A plain phone number is turned into a `@c.us` JID for you.
+        - **Check before you message a new number**: `check_number` tells you
+          whether a number is registered on WhatsApp. A `201` send is
+          "accepted by the gateway", **not** "delivered" — a message to a number
+          that is not on WhatsApp looks identical to a successful send.
+
+        ## Action map (tool: `whatsapp`)
+
+        - Read-only: `session`, `list_sessions`, `check_number`, `list_messages`.
+        - Send: `send_text`, `send_image`, `send_document`, `send_location`.
+
+        ## The 500 rule (important)
+
+        OpenWA sometimes hands the message to the WhatsApp client and only then
+        fails server-side, returning an internal server error (**HTTP 500**). The
+        message has already left the gateway. The `whatsapp` tool therefore
+        reports a 5xx on a send as **sent**, not failed. Do **not** retry a send
+        that came back with a 500 — that would double-message the person.
+
+        ## Safe-sending rules
+
+        - **Never** message anyone unless the user explicitly asked for that
+          specific message to that specific person/group.
+        - Never cold-blast strangers: the first-ever message to a batch of
+          numbers that never wrote to you is the fastest way to get the number
+          restricted.
+        - Pace yourself: a few messages per minute per session is sustainable;
+          "thousands in an hour" is not.
+        - Always show the exact text, recipient, and any attachment to the user
+          before sending.
+
+        ## Hard rules
+
+        - Never print, log, or paste the API key.
+        - Never send messages unless explicitly asked.
+        - Verify a recipient's number with `check_number` before first contact.
+        - Do not retry a send that returned a 500.
+        INSTRUCTIONS;
+
+        Skill::updateOrCreate(
+            ['name' => 'whatsapp-operations'],
+            [
+                'description' => 'WhatsApp operations runbook: the local OpenWA/Wazuri gateway, X-API-Key auth, the ready session requirement, chatId/JID formats, the 500-means-sent rule, and safe-sending limits. Load before messaging anyone.',
+                'category' => 'communication',
+                'instructions' => $instructions,
+                'is_active' => true,
+                'created_by' => 'user',
+                'version' => 1,
+            ]
+        );
     }
 }

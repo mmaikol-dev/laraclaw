@@ -3,6 +3,7 @@
 namespace App\Services\Tools;
 
 use App\Models\AgentSetting;
+use App\Services\Agent\ExecutionScope;
 use RuntimeException;
 
 class ShellTool extends BaseTool implements StreamsOutput
@@ -241,8 +242,19 @@ class ShellTool extends BaseTool implements StreamsOutput
 
     private function guardCommand(string $command): void
     {
+        // Elevated privileges are allowed only when the user has approved sudo
+        // for the task/mission currently being executed. The model cannot grant
+        // this to itself — approval is a deliberate user action.
+        if ($this->requiresSudo($command) && ! app(ExecutionScope::class)->sudoAllowed()) {
+            throw new RuntimeException(
+                'Elevated (sudo) privileges are not approved for this run. '
+                .'If this command genuinely requires sudo, request approval first: call task_engine action=request_sudo '
+                .'(or the mission tool action=request_sudo) with a short reason, then ask the user to approve it on the '
+                .'task or mission page. Do not attempt to bypass this check.'
+            );
+        }
+
         $blockedPatterns = [
-            'sudo',
             'su ',
             'passwd',
             'useradd',
@@ -278,6 +290,15 @@ class ShellTool extends BaseTool implements StreamsOutput
                 throw new RuntimeException("Blocked shell pattern detected: {$pattern}");
             }
         }
+    }
+
+    /**
+     * Whether a command invokes sudo (including via an absolute path or after a
+     * shell separator). Word boundaries keep lookalikes such as `visudo` out.
+     */
+    private function requiresSudo(string $command): bool
+    {
+        return preg_match('/\bsudo\b/', strtolower($command)) === 1;
     }
 
     /**

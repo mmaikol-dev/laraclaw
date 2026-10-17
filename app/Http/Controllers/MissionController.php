@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Mission;
 use App\Services\Agent\OpenCodeService;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -43,5 +45,25 @@ class MissionController extends Controller
         }
 
         return [];
+    }
+
+    /**
+     * Approve elevated (sudo) permission for a mission's lifetime.
+     */
+    public function approveSudo(Request $request, Mission $mission): RedirectResponse
+    {
+        $mission->approveSudo($request->user()?->id);
+
+        return back()->with('status', "Sudo approved for mission '{$mission->name}'.");
+    }
+
+    /**
+     * Deny elevated (sudo) permission for a mission.
+     */
+    public function denySudo(Request $request, Mission $mission): RedirectResponse
+    {
+        $mission->denySudo($request->user()?->id);
+
+        return back()->with('status', "Sudo denied for mission '{$mission->name}'.");
     }
 }

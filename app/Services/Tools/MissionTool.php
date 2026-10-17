@@ -45,7 +45,7 @@ class MissionTool extends BaseTool
                         'set_contract', 'add_feature', 'update_feature',
                         'start', 'advance', 'pause', 'resume', 'complete', 'fail',
                         'record_handoff', 'add_context_note',
-                        'set_models', 'list_models',
+                        'set_models', 'list_models', 'request_sudo',
                     ],
                     'description' => implode(' ', [
                         'list: show all missions.',
@@ -62,6 +62,7 @@ class MissionTool extends BaseTool
                         'add_context_note: persist context for future workers — pass mission_name and note.',
                         'set_models: assign models per role (Droid Whispering) — pass mission_name plus any of orchestrator_model, worker_model, validator_model.',
                         'list_models: show opencode models available for role assignment.',
+                        'request_sudo: ask the user for elevated (sudo) permission for this mission; workers cannot run sudo commands until the user approves it.',
                     ]),
                 ],
                 'mission_name' => ['type' => 'string', 'description' => 'Mission name.'],
@@ -85,6 +86,8 @@ class MissionTool extends BaseTool
                 'orchestrator_model' => ['type' => 'string', 'description' => 'Model for planning/set_models.'],
                 'worker_model' => ['type' => 'string', 'description' => 'Model for implementation/set_models.'],
                 'validator_model' => ['type' => 'string', 'description' => 'Model for verification — prefer a different provider than the worker (set_models).'],
+                'requires_sudo' => ['type' => 'boolean', 'description' => 'For create: set true when the mission is expected to need elevated (sudo) privileges. Requests user approval before workers may use sudo.'],
+                'reason' => ['type' => 'string', 'description' => 'For request_sudo (and create with requires_sudo): a short explanation of why sudo is needed, shown to the user.'],
             ],
             'required' => ['action'],
         ];
@@ -113,6 +116,7 @@ class MissionTool extends BaseTool
             'add_context_note' => $this->addContextNote($arguments),
             'set_models' => $this->setModels($arguments),
             'list_models' => $this->listModels(),
+            'request_sudo' => $this->requestSudo($arguments),
             default => throw new RuntimeException('Unsupported mission action.'),
         };
     }
@@ -223,6 +227,15 @@ OUT;
 
         $mission = Mission::create(['name' => $name, 'goal' => $goal, 'status' => 'scoping']);
 
+        $sudoNote = '';
+
+        if (($args['requires_sudo'] ?? false) === true) {
+            $reason = trim((string) ($args['reason'] ?? ''))
+                ?: 'This mission is expected to need elevated (sudo) privileges.';
+            $mission->requestSudo($reason);
+            $sudoNote = ' Sudo approval was requested; ask the user to approve it on the Missions page before any worker uses sudo.';
+        }
+
         $this->orchestrator->startHuddle($mission);
 
         $scopingNote = '';
@@ -232,7 +245,29 @@ OUT;
             $scopingNote = ' An orchestrator scoping run was queued to draft features, milestones, and the Validation Contract.';
         }
 
-        return "Mission '{$name}' created in scoping.{$scopingNote} Next: act as ORCHESTRATOR — decompose the goal into features/milestones and write the Validation Contract (set_contract + add_feature), then start.";
+        return "Mission '{$name}' created in scoping.{$scopingNote}{$sudoNote} Next: act as ORCHESTRATOR — decompose the goal into features/milestones and write the Validation Contract (set_contract + add_feature), then start.";
+    }
+
+    /**
+     * Ask the user for elevated (sudo) permission for a mission. Workers may not
+     * run sudo commands until the user approves it on the Missions page.
+     *
+     * @param  array<string, mixed>  $args
+     */
+    private function requestSudo(array $args): string
+    {
+        $mission = $this->findOrFail((string) ($args['mission_name'] ?? ''));
+
+        if ($mission->sudoAllowed()) {
+            return "Mission '{$mission->name}' already has sudo approved; workers may use elevated commands.";
+        }
+
+        $reason = trim((string) ($args['reason'] ?? ''))
+            ?: 'This mission needs elevated (sudo) privileges.';
+
+        $mission->requestSudo($reason);
+
+        return "Sudo approval requested for mission '{$mission->name}'. Ask the user to approve or deny it on the Missions page. No worker will run elevated commands until it is approved.";
     }
 
     /**

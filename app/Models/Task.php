@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\SudoStatus;
 use App\Enums\TaskFailureType;
 use App\Enums\TaskStatus;
 use App\Enums\TaskStepStatus;
@@ -30,6 +31,8 @@ class Task extends Model
         'execution_state',
         'attempts',
         'max_attempts',
+        'auto_recoveries',
+        'needs_human_input',
         'failure_type',
         'failure_reason',
         'last_heartbeat_at',
@@ -40,6 +43,11 @@ class Task extends Model
         'waiting_reason',
         'waiting_since',
         'resume_condition',
+        'sudo_status',
+        'sudo_reason',
+        'sudo_requested_at',
+        'sudo_resolved_at',
+        'sudo_resolved_by',
         'verification_status',
         'acceptance_criteria',
         'verification_results',
@@ -55,15 +63,20 @@ class Task extends Model
         return [
             'status' => TaskStatus::class,
             'failure_type' => TaskFailureType::class,
+            'sudo_status' => SudoStatus::class,
             'execution_state' => 'array',
             'acceptance_criteria' => 'array',
             'verification_results' => 'array',
+            'needs_human_input' => 'boolean',
+            'auto_recoveries' => 'integer',
             'last_heartbeat_at' => 'datetime',
             'last_verified_at' => 'datetime',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
             'waiting_since' => 'datetime',
             'resume_condition' => 'array',
+            'sudo_requested_at' => 'datetime',
+            'sudo_resolved_at' => 'datetime',
         ];
     }
 
@@ -82,7 +95,10 @@ class Task extends Model
         'current_step' => 0,
         'total_steps' => 0,
         'max_attempts' => 5,
+        'auto_recoveries' => 0,
+        'needs_human_input' => false,
         'heartbeat_interval_seconds' => 90,
+        'sudo_status' => 'none',
     ];
 
     public function user(): BelongsTo
@@ -190,6 +206,61 @@ class Task extends Model
             'waiting_reason' => null,
             'waiting_since' => null,
             'resume_condition' => null,
+            'needs_human_input' => false,
+        ])->save();
+    }
+
+    /**
+     * Record that the task has been restarted automatically (by the supervisor)
+     * without making real progress. Reset whenever a step completes.
+     */
+    public function incrementAutoRecoveries(): void
+    {
+        $this->increment('auto_recoveries');
+    }
+
+    public function resetAutoRecoveries(): void
+    {
+        if ($this->auto_recoveries !== 0) {
+            $this->forceFill(['auto_recoveries' => 0])->save();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Elevated (sudo) approval
+    // -------------------------------------------------------------------------
+
+    public function sudoAllowed(): bool
+    {
+        return $this->sudo_status === SudoStatus::Approved;
+    }
+
+    public function requestSudo(string $reason): void
+    {
+        $this->forceFill([
+            'sudo_status' => SudoStatus::Requested,
+            'sudo_reason' => $reason,
+            'sudo_requested_at' => now(),
+            'sudo_resolved_at' => null,
+            'sudo_resolved_by' => null,
+        ])->save();
+    }
+
+    public function approveSudo(?int $userId = null): void
+    {
+        $this->forceFill([
+            'sudo_status' => SudoStatus::Approved,
+            'sudo_resolved_at' => now(),
+            'sudo_resolved_by' => $userId,
+        ])->save();
+    }
+
+    public function denySudo(?int $userId = null): void
+    {
+        $this->forceFill([
+            'sudo_status' => SudoStatus::Denied,
+            'sudo_resolved_at' => now(),
+            'sudo_resolved_by' => $userId,
         ])->save();
     }
 
@@ -211,6 +282,25 @@ class Task extends Model
         return $this->last_heartbeat_at
             ->addSeconds($this->heartbeat_interval_seconds)
             ->isPast();
+    }
+
+    /**
+     * Whether a step is currently executing within its allowed time window.
+     *
+     * Acts as an in-flight heartbeat: a worker that is actively running a step
+     * (e.g. a slow OpenCode turn) keeps the task alive for up to
+     * `agent.task.step_timeout_seconds`, so it is never mistaken for a stalled
+     * task. Once that window passes with the step still Running, the task is
+     * considered dead and normal recovery applies.
+     */
+    public function hasInFlightStep(): bool
+    {
+        $timeout = (int) config('agent.task.step_timeout_seconds', 3600);
+
+        return $this->steps()
+            ->where('status', TaskStepStatus::Running)
+            ->where('started_at', '>=', now()->subSeconds($timeout))
+            ->exists();
     }
 
     // -------------------------------------------------------------------------

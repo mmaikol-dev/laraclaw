@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\SudoStatus;
 use App\Jobs\AdvanceMissionJob;
 use App\Models\Mission;
 use App\Services\Agent\MissionService;
@@ -226,5 +227,39 @@ class MissionToolTest extends TestCase
         $this->assertStringContainsString('ADVERSARIAL BY DESIGN', $prompt);
         $this->assertStringContainsString('other-provider/model-x', $prompt);
         $this->assertStringContainsString('Coverage above 90%.', $prompt);
+    }
+
+    public function test_request_sudo_records_a_mission_level_request(): void
+    {
+        $this->tool->execute(['action' => 'create', 'name' => 'sudo-mission', 'goal' => 'Needs root.']);
+
+        $output = $this->tool->execute([
+            'action' => 'request_sudo',
+            'mission_name' => 'sudo-mission',
+            'reason' => 'Install nginx',
+        ]);
+
+        $mission = Mission::query()->where('name', 'sudo-mission')->sole();
+
+        $this->assertSame(SudoStatus::Requested, $mission->sudo_status);
+        $this->assertSame('Install nginx', $mission->sudo_reason);
+        $this->assertStringContainsString('Sudo approval requested', $output);
+    }
+
+    public function test_create_with_requires_sudo_requests_approval(): void
+    {
+        $output = $this->tool->execute([
+            'action' => 'create',
+            'name' => 'rooted-mission',
+            'goal' => 'Provision the server.',
+            'requires_sudo' => true,
+            'reason' => 'Configure iptables',
+        ]);
+
+        $mission = Mission::query()->where('name', 'rooted-mission')->sole();
+
+        $this->assertSame(SudoStatus::Requested, $mission->sudo_status);
+        $this->assertSame('Configure iptables', $mission->sudo_reason);
+        $this->assertStringContainsString('Sudo approval was requested', $output);
     }
 }

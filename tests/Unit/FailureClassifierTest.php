@@ -30,6 +30,25 @@ class FailureClassifierTest extends TestCase
         $this->assertFalse(TaskFailureType::PermissionError->isRetryable());
     }
 
+    public function test_http_auth_errors_are_not_retryable(): void
+    {
+        $classifier = new FailureClassifier;
+
+        $this->assertSame(
+            TaskFailureType::PermissionError,
+            $classifier->classify('Ollama chat stream failed with status 401: Unauthorized')
+        );
+        $this->assertSame(
+            TaskFailureType::PermissionError,
+            $classifier->classify('Ollama chat stream failed with status 401')
+        );
+        $this->assertSame(
+            TaskFailureType::PermissionError,
+            $classifier->classify('Request failed with status 403')
+        );
+        $this->assertFalse(TaskFailureType::PermissionError->isRetryable());
+    }
+
     public function test_model_errors_are_transient(): void
     {
         $classifier = new FailureClassifier;

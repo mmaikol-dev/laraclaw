@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\TaskFailureType;
 use App\Enums\TaskStatus;
 use App\Enums\TaskStepStatus;
 use App\Jobs\ExecuteTaskStepJob;
@@ -118,11 +119,170 @@ class TaskEngineToolTest extends TestCase
         $this->assertStringContainsString('completed', $output);
     }
 
+    public function test_retry_requires_explicit_user_confirmation(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->failed()->create();
+
+        $output = $this->tool->execute(['action' => 'retry', 'task_id' => $task->id]);
+
+        Queue::assertNotPushed(ExecuteTaskStepJob::class);
+        $this->assertStringContainsString('user-initiated', $output);
+    }
+
+    public function test_retry_restarts_a_failed_task(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->failed()->create();
+        $step = TaskStep::factory()->failed()->create([
+            'task_id' => $task->id,
+            'sort_order' => 1,
+            'description' => 'Deploy the site',
+        ]);
+
+        $output = $this->tool->execute([
+            'action' => 'retry',
+            'task_id' => $task->id,
+            'confirmed_by_user' => true,
+        ]);
+
+        Queue::assertPushed(ExecuteTaskStepJob::class, fn (ExecuteTaskStepJob $job): bool => $job->taskId === $task->id);
+        $this->assertStringContainsString('Retrying task', $output);
+
+        $this->assertSame(TaskStepStatus::Pending, $step->fresh()->status);
+        $this->assertSame(TaskStatus::Running, $task->fresh()->status);
+        $this->assertNull($task->fresh()->failure_reason);
+    }
+
+    public function test_retry_recovers_a_stalled_task(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->stale()->create(['current_step' => 2]);
+
+        $output = $this->tool->execute([
+            'action' => 'retry',
+            'task_id' => $task->id,
+            'confirmed_by_user' => true,
+        ]);
+
+        Queue::assertPushed(ExecuteTaskStepJob::class, fn (ExecuteTaskStepJob $job): bool => $job->taskId === $task->id);
+        $this->assertStringContainsString('Recovered stalled task', $output);
+
+        $task->refresh();
+        $this->assertSame(TaskStatus::Running, $task->status);
+        $this->assertTrue($task->last_heartbeat_at->greaterThan(now()->subMinute()));
+    }
+
+    public function test_retry_leaves_a_healthy_running_task_alone(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->running()->create();
+
+        $output = $this->tool->execute([
+            'action' => 'retry',
+            'task_id' => $task->id,
+            'confirmed_by_user' => true,
+        ]);
+
+        Queue::assertNotPushed(ExecuteTaskStepJob::class);
+        $this->assertStringContainsString('not stalled', $output);
+    }
+
+    public function test_retry_does_not_touch_a_paused_task(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->create(['status' => TaskStatus::Paused]);
+
+        $output = $this->tool->execute([
+            'action' => 'retry',
+            'task_id' => $task->id,
+            'confirmed_by_user' => true,
+        ]);
+
+        Queue::assertNotPushed(ExecuteTaskStepJob::class);
+        $this->assertStringContainsString('paused', $output);
+        $this->assertSame(TaskStatus::Paused, $task->fresh()->status);
+    }
+
+    public function test_retry_refuses_a_cancelled_task(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->create(['status' => TaskStatus::Cancelled]);
+
+        $output = $this->tool->execute([
+            'action' => 'retry',
+            'task_id' => $task->id,
+            'confirmed_by_user' => true,
+        ]);
+
+        Queue::assertNotPushed(ExecuteTaskStepJob::class);
+        $this->assertStringContainsString('cancelled', $output);
+    }
+
+    public function test_retry_reports_a_completed_task(): void
+    {
+        Queue::fake();
+
+        $task = Task::factory()->completed()->create();
+
+        $output = $this->tool->execute([
+            'action' => 'retry',
+            'task_id' => $task->id,
+            'confirmed_by_user' => true,
+        ]);
+
+        Queue::assertNotPushed(ExecuteTaskStepJob::class);
+        $this->assertStringContainsString('already completed', $output);
+    }
+
+    public function test_retry_without_task_id_throws(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('task_id is required');
+
+        $this->tool->execute(['action' => 'retry', 'confirmed_by_user' => true]);
+    }
+
     public function test_unknown_action_throws(): void
     {
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Unsupported task_engine action');
 
         $this->tool->execute(['action' => 'nope']);
+    }
+
+    public function test_stale_lists_stalled_and_human_input_tasks(): void
+    {
+        Queue::fake();
+
+        $stale = Task::factory()->stale()->create(['goal' => 'Stalled deploy']);
+        $parked = Task::factory()->create([
+            'goal' => 'Needs a human',
+            'status' => TaskStatus::Waiting,
+            'needs_human_input' => true,
+            'failure_type' => TaskFailureType::PermissionError,
+        ]);
+
+        $output = $this->tool->execute(['action' => 'stale']);
+
+        $this->assertStringContainsString('Stalled deploy', $output);
+        $this->assertStringContainsString("#{$stale->id}", $output);
+        $this->assertStringContainsString('Awaiting human input', $output);
+        $this->assertStringContainsString("#{$parked->id}", $output);
+    }
+
+    public function test_stale_reports_when_nothing_is_stalled(): void
+    {
+        Task::factory()->running()->create();
+
+        $output = $this->tool->execute(['action' => 'stale']);
+
+        $this->assertStringContainsString('No stale tasks', $output);
     }
 }
